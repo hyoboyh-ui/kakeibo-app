@@ -2,7 +2,7 @@
 // 木村家 家計簿アプリ
 // ============================================================
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyNRRhh7znhk3IX6tgZQmXwDqHZPeE3sJQg1yQO0XeDRvE3ajNP4slURVkUn0rGfPKy/exec'; // デプロイ後に置き換え
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbylz_Wl5dAR6hHz0DxIE-gWpAWxGbkzQZKNtkCQ41w_5gdqPZvyTcJ0TAexsTsQ1x0x/exec'; // デプロイ後に置き換え
 
 const CATEGORIES = [
   { key: '食費',             hasMemo: false },
