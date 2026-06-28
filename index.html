@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#4A90D9">
+  <title>木村家 家計簿</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ============================================================
+     LOGIN
+============================================================ -->
+<div id="login-screen" style="display:none">
+  <div class="login-card">
+    <h1>🏠 木村家 家計簿</h1>
+    <p id="login-hint">パスワードを入力してください<br>（初回はお好きなパスワードを設定）</p>
+    <form id="login-form">
+      <div class="form-group">
+        <input type="password" id="pwd-input" class="form-control"
+          placeholder="パスワード" autocomplete="current-password" required>
+      </div>
+      <div id="login-error" style="color:var(--danger);font-size:13px;margin-bottom:12px"></div>
+      <button type="submit" class="btn btn-primary">ログイン</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================
+     APP
+============================================================ -->
+<div id="app-screen" style="display:none;flex-direction:column;min-height:100vh">
+
+  <header>
+    <h1 id="header-title">家計簿</h1>
+    <div class="header-icons">
+      <button class="icon-btn" onclick="openEntryModal()" title="記録する">＋</button>
+    </div>
+  </header>
+
+  <div class="main-content">
+
+    <!-- DASHBOARD -->
+    <div class="view" id="view-dashboard">
+      <div class="card">
+        <div class="section-title">今月の予算残高</div>
+        <div id="budget-list"></div>
+      </div>
+    </div>
+
+    <!-- HISTORY -->
+    <div class="view hidden" id="view-history">
+      <div id="history-list"></div>
+    </div>
+
+    <!-- CHART -->
+    <div class="view hidden" id="view-chart">
+      <div class="card">
+        <div class="section-title">月次比較</div>
+        <div class="chart-tabs">
+          <button class="tab-btn active" data-mode="total" onclick="renderBarChart('total')">総支出</button>
+          <button class="tab-btn" data-mode="category" onclick="renderBarChart('category')">カテゴリ別</button>
+        </div>
+        <div id="chart-container"></div>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="view hidden" id="view-settings">
+      <div class="card">
+        <div class="section-title">月次予算の設定</div>
+        <div id="budget-inputs"></div>
+        <button class="btn btn-primary mt-4" onclick="saveBudget()">予算を保存</button>
+      </div>
+
+      <div class="card">
+        <div class="section-title">パスワード変更</div>
+        <div class="form-group">
+          <label class="form-label">現在のパスワード</label>
+          <input type="password" id="old-pwd" class="form-control" placeholder="現在のパスワード">
+        </div>
+        <div class="form-group">
+          <label class="form-label">新しいパスワード</label>
+          <input type="password" id="new-pwd" class="form-control" placeholder="新しいパスワード">
+        </div>
+        <button class="btn btn-ghost" onclick="changePassword()">パスワードを変更</button>
+      </div>
+
+      <div class="card">
+        <div class="section-title">アカウント</div>
+        <div class="settings-item">
+          <span class="settings-label">ログアウト</span>
+          <button class="btn btn-ghost" style="width:auto;padding:8px 16px;font-size:13px"
+            onclick="sessionStorage.clear();location.reload()">ログアウト</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-content -->
+
+  <!-- FAB -->
+  <button class="fab" id="fab" title="記録する">＋</button>
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-view="dashboard">
+      <span class="icon">🏠</span>
+      <span>ホーム</span>
+    </button>
+    <button class="nav-btn" data-view="history">
+      <span class="icon">📋</span>
+      <span>履歴</span>
+    </button>
+    <button class="nav-btn" data-view="chart">
+      <span class="icon">📊</span>
+      <span>グラフ</span>
+    </button>
+    <button class="nav-btn" data-view="settings">
+      <span class="icon">⚙️</span>
+      <span>設定</span>
+    </button>
+  </nav>
+
+</div><!-- /app-screen -->
+
+<!-- ============================================================
+     ENTRY MODAL
+============================================================ -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="modal-title">支出を記録</div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- LOADING -->
+<div class="loading-overlay" id="loading-overlay">
+  <div class="spinner"></div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
