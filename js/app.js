@@ -563,6 +563,12 @@ function renderEditForm(entry, cat, d) {
 
 function selectPayment(method) {
   entryFormState.payment = method;
+  if (method === 'カード') {
+    const sel = document.getElementById('card-type-select');
+    entryFormState.cardType = sel ? sel.value : CARD_TYPES[0];
+  } else {
+    entryFormState.cardType = null;
+  }
   document.querySelectorAll('[data-payment]').forEach(btn => {
     btn.classList.toggle('selected', btn.dataset.payment === method);
   });
