@@ -74,6 +74,26 @@ header button.icon-btn {
   line-height: 1;
 }
 
+.month-select-header {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: #fff;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 600;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  max-width: 110px;
+}
+
+.month-select-header option {
+  background: var(--primary-dark);
+  color: #fff;
+}
+
 .main-content {
   flex: 1;
   padding: 16px;

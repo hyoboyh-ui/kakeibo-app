@@ -100,8 +100,44 @@ async function showApp() {
 
   showLoading(true);
   await loadCurrentMonth();
+  await loadAvailableMonths();
   showLoading(false);
   renderDashboard();
+}
+
+async function loadAvailableMonths() {
+  try {
+    const res = await gasCall({ action: 'getAllMonths' });
+    const sel = document.getElementById('month-select');
+    sel.innerHTML = '';
+    const months = res.months || [];
+    // 新しい月順に並べる
+    months.slice().reverse().forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.sheetName;
+      opt.textContent = m.sheetName;
+      if (m.sheetName === state.currentSheet) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    // 現在のシートがリストにない場合（初回など）は先頭に追加
+    if (months.length === 0 && state.currentSheet) {
+      const opt = document.createElement('option');
+      opt.value = state.currentSheet;
+      opt.textContent = state.currentSheet;
+      opt.selected = true;
+      sel.appendChild(opt);
+    }
+  } catch (err) {
+    // 失敗してもUI表示は維持
+  }
+}
+
+async function onMonthChange(sheetName) {
+  showLoading(true);
+  await loadCurrentMonth(sheetName);
+  showLoading(false);
+  if (state.currentView === 'dashboard') renderDashboard();
+  if (state.currentView === 'history')   renderHistory();
 }
 
 async function loadCurrentMonth(sheetName) {
@@ -117,7 +153,11 @@ async function loadCurrentMonth(sheetName) {
 }
 
 function updateAvailableSheets() {
-  // シート切替用（グラフ画面などで使用）
+  const sel = document.getElementById('month-select');
+  if (!sel) return;
+  Array.from(sel.options).forEach(opt => {
+    opt.selected = opt.value === state.currentSheet;
+  });
 }
 
 // ============================================================
