@@ -293,8 +293,8 @@ function renderHistory() {
           ${d.メモ ? `<div class="entry-cat-sub">📝 ${d.メモ}</div>` : ''}
         </div>
         <div class="entry-amount">
-          ${hasCash ? `<div>¥${fmt(d.現金)} <span class="payment-badge badge-cash">現金</span></div>` : ''}
-          ${hasCard ? `<div>¥${fmt(d.カード)} <span class="payment-badge badge-card">カード</span></div>` : ''}
+          ${hasCash ? `<div>¥${fmt(d.現金)} <span class="payment-badge badge-cash"><img src="icons/cash.png" class="payment-icon-small"> 現金</span></div>` : ''}
+          ${hasCard ? `<div>¥${fmt(d.カード)} <span class="payment-badge badge-card"><img src="icons/card.png" class="payment-icon-small"> カード</span></div>` : ''}
         </div>
         <div style="font-size:18px;color:var(--text-sub);margin-left:4px">›</div>
       `;
@@ -496,8 +496,8 @@ function renderEntryForm() {
       <div class="form-group">
         <label class="form-label">支払方法</label>
         <div class="radio-group">
-          <button class="radio-btn" data-payment="現金" onclick="selectPayment('現金')">💴 現金</button>
-          <button class="radio-btn" data-payment="カード" onclick="selectPayment('カード')">💳 カード</button>
+          <button class="radio-btn" data-payment="現金" onclick="selectPayment('現金')"><img src="icons/cash.png" class="payment-icon-btn"> 現金</button>
+          <button class="radio-btn" data-payment="カード" onclick="selectPayment('カード')"><img src="icons/card.png" class="payment-icon-btn"> カード</button>
         </div>
       </div>
     </div>
