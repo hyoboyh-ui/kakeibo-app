@@ -573,6 +573,259 @@ canvas { max-width: 100%; }
 }
 
 /* ============================================================
+   SUMMARY (集計ページ)
+============================================================ */
+.summary-year-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.summary-year-select {
+  background: #fff;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 28px 8px 14px;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: inherit;
+  color: var(--text);
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23718096' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* レシートカード */
+.receipt-card {
+  background: #fff;
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 3px 12px rgba(100,60,160,0.12);
+  cursor: pointer;
+  position: relative;
+  overflow: visible;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.receipt-card:active { transform: scale(0.97); }
+
+.receipt-card-inner {
+  padding: 12px 12px 14px;
+}
+
+/* ジグザグ底辺 */
+.receipt-card::after {
+  content: '';
+  display: block;
+  height: 10px;
+  background:
+    linear-gradient(135deg, #fff 33.33%, transparent 33.33%) 0 0,
+    linear-gradient(-135deg, #fff 33.33%, transparent 33.33%) 0 0;
+  background-size: 12px 10px;
+  background-repeat: repeat-x;
+  background-color: var(--bg);
+}
+
+.receipt-card.no-data {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* カードヘッダー帯 */
+.receipt-header {
+  background: linear-gradient(120deg, #84C9EF, #CBBDDD);
+  margin: -12px -12px 10px;
+  padding: 8px 12px;
+  border-radius: 12px 12px 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.receipt-month {
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff;
+}
+.receipt-month-unit {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.8);
+}
+
+/* 合計金額 */
+.receipt-total {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 8px;
+  letter-spacing: -0.02em;
+}
+.receipt-total-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-sub);
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
+}
+
+/* 仕切り線 */
+.receipt-divider {
+  border: none;
+  border-top: 1px dashed var(--border);
+  margin: 8px 0;
+}
+
+/* カテゴリ内訳 */
+.receipt-cat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  margin-bottom: 3px;
+  color: var(--text);
+}
+.receipt-cat-name {
+  color: var(--text-sub);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 6px;
+}
+.receipt-cat-amt {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.receipt-no-data-label {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-sub);
+  padding: 16px 0 8px;
+}
+
+/* ズームオーバーレイ */
+.summary-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(30,10,60,0.55);
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.summary-zoom-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.summary-zoom-card {
+  background: #fff;
+  border-radius: 20px;
+  width: 100%;
+  max-width: 360px;
+  max-height: 85vh;
+  overflow-y: auto;
+  position: relative;
+  transform: scale(0.9);
+  transition: transform 0.2s;
+  box-shadow: 0 12px 40px rgba(30,10,60,0.3);
+}
+.summary-zoom-overlay.open .summary-zoom-card {
+  transform: scale(1);
+}
+
+.summary-zoom-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  background: rgba(255,255,255,0.8);
+  border: none;
+  font-size: 18px;
+  color: var(--text-sub);
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+/* ズームカード内コンテンツ */
+.zoom-header {
+  background: linear-gradient(120deg, #84C9EF, #CBBDDD);
+  border-radius: 20px 20px 0 0;
+  padding: 20px 20px 18px;
+}
+.zoom-month-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  margin-bottom: 4px;
+}
+.zoom-total-label {
+  font-size: 13px;
+  color: rgba(255,255,255,0.75);
+  margin-bottom: 4px;
+}
+.zoom-total-amt {
+  font-size: 38px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.zoom-total-unit {
+  font-size: 18px;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+.zoom-body {
+  padding: 16px 20px 28px;
+}
+.zoom-cat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+.zoom-cat-row:last-child { border-bottom: none; }
+.zoom-cat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.zoom-cat-name {
+  font-size: 15px;
+  color: var(--text);
+  flex: 1;
+}
+.zoom-cat-amt {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
    TOAST
 ============================================================ */
 .toast {

@@ -59,6 +59,14 @@
       <div id="history-list"></div>
     </div>
 
+    <!-- SUMMARY -->
+    <div class="view hidden" id="view-summary">
+      <div class="summary-year-row">
+        <select id="summary-year-select" class="summary-year-select" onchange="onSummaryYearChange(this.value)"></select>
+      </div>
+      <div id="summary-grid" class="summary-grid"></div>
+    </div>
+
     <!-- CHART -->
     <div class="view hidden" id="view-chart">
       <div class="card">
@@ -117,6 +125,10 @@
       <img class="nav-icon" src="icons/history.png" alt="履歴">
       <span>履歴</span>
     </button>
+    <button class="nav-btn" data-view="summary">
+      <img class="nav-icon" src="icons/summary.png" alt="集計">
+      <span>集計</span>
+    </button>
     <button class="nav-btn" data-view="chart">
       <img class="nav-icon" src="icons/chart.png" alt="グラフ">
       <span>グラフ</span>
@@ -137,6 +149,14 @@
     <div class="modal-handle"></div>
     <div class="modal-title" id="modal-title">支出を記録</div>
     <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- SUMMARY ZOOM OVERLAY -->
+<div class="summary-zoom-overlay" id="summary-zoom-overlay" onclick="closeSummaryZoom()">
+  <div class="summary-zoom-card" id="summary-zoom-card" onclick="event.stopPropagation()">
+    <button class="summary-zoom-close" onclick="closeSummaryZoom()">✕</button>
+    <div id="summary-zoom-body"></div>
   </div>
 </div>
 

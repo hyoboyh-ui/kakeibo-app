@@ -5,16 +5,16 @@
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbylz_Wl5dAR6hHz0DxIE-gWpAWxGbkzQZKNtkCQ41w_5gdqPZvyTcJ0TAexsTsQ1x0x/exec'; // デプロイ後に置き換え
 
 const CATEGORIES = [
-  { key: '食費',             hasMemo: false },
-  { key: '雑費',             hasMemo: false },
-  { key: '交際費(交通費)',   hasMemo: false },
-  { key: '交際費(外食)',     hasMemo: false },
-  { key: '保険代',           hasMemo: false },
-  { key: '光熱費(ガス電気)', hasMemo: false },
-  { key: '光熱費(携帯ネット)', hasMemo: false },
-  { key: '水道代',           hasMemo: false },
-  { key: '緊急出費',         hasMemo: true  },
-  { key: '固定費',           hasMemo: false }
+  { key: '食費',             hasMemo: false, color: 'cat-sky'   },
+  { key: '雑費',             hasMemo: false, color: 'cat-blue'  },
+  { key: '交際費(交通費)',   hasMemo: false, color: 'cat-lav'   },
+  { key: '交際費(外食)',     hasMemo: false, color: 'cat-lav'   },
+  { key: '保険代',           hasMemo: false, color: 'cat-mauve' },
+  { key: '光熱費(ガス電気)', hasMemo: false, color: 'cat-blue'  },
+  { key: '光熱費(携帯ネット)', hasMemo: false, color: 'cat-sky' },
+  { key: '水道代',           hasMemo: false, color: 'cat-lav'   },
+  { key: '緊急出費',         hasMemo: true,  color: 'cat-pink'  },
+  { key: '固定費',           hasMemo: false, color: 'cat-mauve' }
 ];
 
 const CARD_TYPES = ['三井住友', 'セゾン', 'JCB', 'その他'];
@@ -30,6 +30,7 @@ const state = {
   selectedDate: null,
   editingEntry: null,
   chartData: null,
+  summaryData: null,
   currentView: 'dashboard'
 };
 
@@ -180,6 +181,7 @@ function switchView(view) {
 
   if (view === 'dashboard') renderDashboard();
   if (view === 'history')   renderHistory();
+  if (view === 'summary')   renderSummary();
   if (view === 'chart')     renderChart();
   if (view === 'settings')  renderSettings();
 }
@@ -285,7 +287,7 @@ function renderHistory() {
       const hasCash = (d.現金 || 0) > 0;
       const hasCard = (d.カード || 0) > 0;
       const item = document.createElement('div');
-      item.className = 'entry-item';
+      item.className = `entry-item ${cat.color || ''}`;
       item.innerHTML = `
         <div style="flex:1">
           <div class="entry-cat">${cat.key}</div>
@@ -376,6 +378,141 @@ function renderBarChart(mode) {
       }
     }
   });
+}
+
+// ============================================================
+// SUMMARY (集計ページ)
+// ============================================================
+
+const CAT_DOT_COLORS = {
+  'cat-sky':   '#84C9EF',
+  'cat-blue':  '#B4D2ED',
+  'cat-lav':   '#CBBDDD',
+  'cat-mauve': '#DCB5D4',
+  'cat-pink':  '#E3B1D2'
+};
+
+async function renderSummary() {
+  const grid = document.getElementById('summary-grid');
+  grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0"><div class="spinner"></div></div>';
+
+  try {
+    const res = await gasCall({ action: 'getAllMonths' });
+    state.summaryData = res.months || [];
+  } catch (err) {
+    document.getElementById('summary-grid').innerHTML =
+      '<div class="empty-state" style="grid-column:1/-1"><p>データ取得エラー</p></div>';
+    return;
+  }
+
+  // 年一覧を抽出
+  const years = [...new Set(state.summaryData.map(m => {
+    const match = m.sheetName.match(/(\d+)年/);
+    return match ? match[1] : null;
+  }).filter(Boolean))].sort((a, b) => b - a);
+
+  const sel = document.getElementById('summary-year-select');
+  sel.innerHTML = '';
+  const currentYear = String(new Date().getFullYear());
+  years.forEach(y => {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y + '年';
+    if (y === currentYear) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  if (!years.includes(currentYear) && years.length > 0) {
+    sel.value = years[0];
+  }
+
+  buildSummaryGrid(sel.value);
+}
+
+function onSummaryYearChange(year) {
+  buildSummaryGrid(year);
+}
+
+function buildSummaryGrid(year) {
+  const grid = document.getElementById('summary-grid');
+  grid.innerHTML = '';
+
+  for (let month = 1; month <= 12; month++) {
+    const sheetName = `${year}年${String(month).padStart(2, '0')}月`;
+    const data = (state.summaryData || []).find(m => m.sheetName === sheetName);
+
+    const card = document.createElement('div');
+    card.className = 'receipt-card' + (data ? '' : ' no-data');
+
+    if (data) {
+      const total = CATEGORIES.reduce((s, cat) => s + (data.totals[cat.key] || 0), 0);
+      const rows = CATEGORIES
+        .map(cat => ({ cat, amt: data.totals[cat.key] || 0 }))
+        .filter(r => r.amt > 0);
+
+      card.innerHTML = `
+        <div class="receipt-card-inner">
+          <div class="receipt-header">
+            <span class="receipt-month">${month}</span>
+            <span class="receipt-month-unit">月</span>
+          </div>
+          <div class="receipt-total-label">合計支出</div>
+          <div class="receipt-total">¥${fmt(total)}</div>
+          <hr class="receipt-divider">
+          ${rows.slice(0, 5).map(r => `
+            <div class="receipt-cat-row">
+              <span class="receipt-cat-name">${r.cat.key}</span>
+              <span class="receipt-cat-amt">¥${fmt(r.amt)}</span>
+            </div>
+          `).join('')}
+          ${rows.length > 5 ? `<div style="font-size:9px;color:var(--text-sub);text-align:right;margin-top:2px">他 ${rows.length - 5} 件</div>` : ''}
+        </div>
+      `;
+      card.addEventListener('click', () => openSummaryZoom(sheetName, data));
+    } else {
+      card.innerHTML = `
+        <div class="receipt-card-inner">
+          <div class="receipt-header">
+            <span class="receipt-month">${month}</span>
+            <span class="receipt-month-unit">月</span>
+          </div>
+          <div class="receipt-no-data-label">記録なし</div>
+        </div>
+      `;
+    }
+
+    grid.appendChild(card);
+  }
+}
+
+function openSummaryZoom(sheetName, data) {
+  const total = CATEGORIES.reduce((s, cat) => s + (data.totals[cat.key] || 0), 0);
+  const rows = CATEGORIES
+    .map(cat => ({ cat, amt: data.totals[cat.key] || 0 }))
+    .filter(r => r.amt > 0);
+
+  document.getElementById('summary-zoom-body').innerHTML = `
+    <div class="zoom-header">
+      <div class="zoom-month-label">${sheetName}</div>
+      <div class="zoom-total-label">合計支出</div>
+      <div class="zoom-total-amt">¥${fmt(total)}<span class="zoom-total-unit">円</span></div>
+    </div>
+    <div class="zoom-body">
+      ${rows.map(r => `
+        <div class="zoom-cat-row">
+          <div class="zoom-cat-dot" style="background:${CAT_DOT_COLORS[r.cat.color] || '#CBBDDD'}"></div>
+          <div class="zoom-cat-name">${r.cat.key}</div>
+          <div class="zoom-cat-amt">¥${fmt(r.amt)}</div>
+        </div>
+      `).join('')}
+      ${rows.length === 0 ? '<p style="text-align:center;color:var(--text-sub);padding:20px 0">記録なし</p>' : ''}
+    </div>
+  `;
+
+  document.getElementById('summary-zoom-overlay').classList.add('open');
+}
+
+function closeSummaryZoom() {
+  document.getElementById('summary-zoom-overlay').classList.remove('open');
 }
 
 // ============================================================
