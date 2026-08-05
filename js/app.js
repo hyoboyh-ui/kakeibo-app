@@ -31,6 +31,7 @@ const state = {
   editingEntry: null,
   chartData: null,
   summaryData: null,
+  allMonths: null,
   currentView: 'dashboard'
 };
 
@@ -141,12 +142,20 @@ async function showApp() {
   renderDashboard();
 }
 
+// getAllMonths の結果はホーム・集計・グラフで共有する。
+// 支出の保存・更新時に state.allMonths を破棄しているため、内容が古くなることはない。
+async function loadAllMonths(force) {
+  if (!force && state.allMonths) return state.allMonths;
+  const res = await gasCall({ action: 'getAllMonths' });
+  state.allMonths = res.months || [];
+  return state.allMonths;
+}
+
 async function loadAvailableMonths() {
   try {
-    const res = await gasCall({ action: 'getAllMonths' });
+    const months = await loadAllMonths(true);
     const sel = document.getElementById('month-select');
     sel.innerHTML = '';
-    const months = res.months || [];
     // 新しい月順に並べる
     months.slice().reverse().forEach(m => {
       const opt = document.createElement('option');
@@ -355,8 +364,7 @@ async function renderChart() {
   container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
 
   try {
-    const res = await gasCall({ action: 'getAllMonths' });
-    state.chartData = res.months;
+    state.chartData = await loadAllMonths();
     renderBarChart('total');
   } catch (err) {
     container.innerHTML = `<div class="empty-state"><p>データ取得エラー</p></div>`;
@@ -433,8 +441,7 @@ async function renderSummary() {
   grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0"><div class="spinner"></div></div>';
 
   try {
-    const res = await gasCall({ action: 'getAllMonths' });
-    state.summaryData = res.months || [];
+    state.summaryData = await loadAllMonths();
   } catch (err) {
     document.getElementById('summary-grid').innerHTML =
       '<div class="empty-state" style="grid-column:1/-1"><p>データ取得エラー</p></div>';
@@ -584,6 +591,7 @@ async function saveBudget() {
   showLoading(true);
   try {
     await gasCall({ action: 'updateBudget', sheetName: state.currentSheet, budget });
+    state.allMonths = null;
     await loadCurrentMonth(state.currentSheet);
     showToast('予算を保存しました');
   } catch (err) {
@@ -827,6 +835,7 @@ async function submitEntry() {
       amount,
       memo
     });
+    state.allMonths = null;
     await loadCurrentMonth(state.currentSheet);
     closeModal();
     showToast('記録しました ✓');
@@ -856,6 +865,7 @@ async function submitEdit() {
       category: categoryKey,
       cashAmount, cardAmount, cardType, memo
     });
+    state.allMonths = null;
     await loadCurrentMonth(state.currentSheet);
     closeModal();
     showToast('更新しました ✓');
@@ -881,6 +891,7 @@ async function clearEntry() {
       category: categoryKey,
       cashAmount: 0, cardAmount: 0, cardType: '', memo: ''
     });
+    state.allMonths = null;
     await loadCurrentMonth(state.currentSheet);
     closeModal();
     showToast('クリアしました');
