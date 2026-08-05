@@ -2,7 +2,19 @@
 // 木村家 家計簿 - Google Apps Script バックエンド
 // ============================================================
 
-const SPREADSHEET_ID = 'AKfycbz0DSBuzH0mcWphQFSNYqn3ePe47h5up6EpAB6qDjW7-oQwYKqOrdFiGcetXaepafhO'; // デプロイ後に置き換え
+// このスクリプトが紐づいているスプレッドシートを使うため、通常はIDの設定は不要。
+// スプレッドシートから独立したスクリプトとして動かす場合のみ、下記にIDを入れる。
+// （スプレッドシートのURL https://docs.google.com/spreadsheets/d/★ここ★/edit の部分）
+const SPREADSHEET_ID = '';
+
+function getSS() {
+  const active = SpreadsheetApp.getActive();
+  if (active) return active;
+  if (!SPREADSHEET_ID) {
+    throw new Error('スプレッドシートに紐づいていません。Code.gs の SPREADSHEET_ID を設定してください。');
+  }
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
+}
 
 // 列定義
 const COLS = {
@@ -112,7 +124,7 @@ function getCurrentSheetName() {
 // ============================================================
 
 function createSheet(sheetName) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSS();
   let ws = ss.getSheetByName(sheetName);
   if (ws) return ws;
 
@@ -181,7 +193,7 @@ function columnLetter(n) {
 
 function getMonthData(sheetName) {
   const name = sheetName || getCurrentSheetName();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSS();
   let ws = ss.getSheetByName(name);
   if (!ws) ws = createSheet(name);
 
@@ -218,7 +230,7 @@ function getMonthData(sheetName) {
 
 function getBudget(sheetName) {
   const name = sheetName || getCurrentSheetName();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSS();
   let ws = ss.getSheetByName(name);
   if (!ws) ws = createSheet(name);
   const budgetData = ws.getRange(BUDGET_ROW, 1, 1, TOTAL_COLS).getValues()[0];
@@ -242,7 +254,7 @@ function getAllMonthsData() {
   const cached = cache.get(MONTHS_CACHE_KEY);
   if (cached) return JSON.parse(cached);
 
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSS();
   const sheets = ss.getSheets();
   const result = [];
   sheets.forEach(ws => {
@@ -282,7 +294,7 @@ function getAllMonthsData() {
 function saveEntry(data) {
   const { sheetName, date, category, paymentMethod, cardType, amount, memo } = data;
   const name = sheetName || getCurrentSheetName();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSS();
   let ws = ss.getSheetByName(name);
   if (!ws) ws = createSheet(name);
 
@@ -321,7 +333,7 @@ function saveEntry(data) {
 function updateEntry(data) {
   const { sheetName, rowIndex, category, paymentMethod, cardType, cashAmount, cardAmount, memo } = data;
   const name = sheetName || getCurrentSheetName();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSS();
   const ws = ss.getSheetByName(name);
   if (!ws) return { error: 'シートが見つかりません' };
 
@@ -340,7 +352,7 @@ function updateEntry(data) {
 function updateBudget(data) {
   const { sheetName, budget } = data;
   const name = sheetName || getCurrentSheetName();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSS();
   let ws = ss.getSheetByName(name);
   if (!ws) ws = createSheet(name);
 
@@ -360,7 +372,7 @@ function updateBudget(data) {
 function checkAndCreateNewSheet() {
   const today = new Date();
   const sheetName = getCurrentSheetName();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = getSS();
   if (!ss.getSheetByName(sheetName)) {
     createSheet(sheetName);
     return { created: true, sheetName };
