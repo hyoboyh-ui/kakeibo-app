@@ -915,12 +915,27 @@ function closeModal() {
 // UTILITIES
 // ============================================================
 
-async function gasCall(payload) {
+async function gasCall(payload, attempt = 0) {
   const res = await fetch(GAS_URL, {
     method: 'POST',
     body: JSON.stringify(payload)
   });
-  const json = await res.json();
+
+  // res.json() だと解析失敗時に中身が分からないので、先にテキストで受ける
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (err) {
+    // iOSのSafariでリダイレクト時に空応答が返ることがあるため、1度だけやり直す
+    if (attempt < 1) {
+      await new Promise(r => setTimeout(r, 600));
+      return gasCall(payload, attempt + 1);
+    }
+    const head = text.trim().slice(0, 60);
+    throw new Error(head ? `サーバー応答が不正です: ${head}` : 'サーバーから空の応答が返りました');
+  }
+
   if (json.error) throw new Error(json.error);
   return json;
 }
