@@ -161,6 +161,7 @@ function createSheet(sheetName) {
   ws.getRange(4, 1, 1, TOTAL_COLS).setFontWeight('bold').setBackground('#CBBDDD').setFontColor('#3D2466');
   ws.getRange(1, 1).setFontSize(14).setFontWeight('bold');
 
+  invalidateMonthsCache();
   return ws;
 }
 
@@ -228,7 +229,19 @@ function getBudget(sheetName) {
   return { budget };
 }
 
+const MONTHS_CACHE_KEY = 'allMonthsData';
+const MONTHS_CACHE_SEC = 300;
+
+// 月別集計が変わる書き込みの後に呼ぶ
+function invalidateMonthsCache() {
+  CacheService.getScriptCache().remove(MONTHS_CACHE_KEY);
+}
+
 function getAllMonthsData() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(MONTHS_CACHE_KEY);
+  if (cached) return JSON.parse(cached);
+
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheets = ss.getSheets();
   const result = [];
@@ -237,9 +250,11 @@ function getAllMonthsData() {
     if (!/\d+年\d+月/.test(name)) return;
     const budget = {};
     const totals = {};
-    const budgetData = ws.getRange(BUDGET_ROW, 1, 1, TOTAL_COLS).getValues()[0];
-    const lastRow = ws.getLastRow();
-    const totalRowValues = ws.getRange(lastRow, 1, 1, TOTAL_COLS).getValues()[0];
+    // シート1枚につきAPI呼び出し1回にまとめる（旧: getLastRow + getRange×2 の3回）
+    const values = ws.getDataRange().getValues();
+    if (values.length < BUDGET_ROW) return;
+    const budgetData = values[BUDGET_ROW - 1];
+    const totalRowValues = values[values.length - 1];
 
     CATEGORIES.forEach(cat => {
       budget[cat.key] = budgetData[cat.cashCol - 1] || 0;
@@ -251,7 +266,13 @@ function getAllMonthsData() {
     result.push({ sheetName: name, budget, totals });
   });
   result.sort((a, b) => a.sheetName.localeCompare(b.sheetName));
-  return { months: result };
+  const payload = { months: result };
+  try {
+    cache.put(MONTHS_CACHE_KEY, JSON.stringify(payload), MONTHS_CACHE_SEC);
+  } catch (err) {
+    // キャッシュ上限(100KB)超過などは無視して通常応答
+  }
+  return payload;
 }
 
 // ============================================================
@@ -293,6 +314,7 @@ function saveEntry(data) {
     ws.getRange(targetRow, cat.memoCol).setValue(existingMemo ? existingMemo + ' / ' + memo : memo);
   }
 
+  invalidateMonthsCache();
   return { success: true };
 }
 
@@ -311,6 +333,7 @@ function updateEntry(data) {
   ws.getRange(rowIndex, cat.cardTypeCol).setValue(cardType || '');
   if (cat.memoCol) ws.getRange(rowIndex, cat.memoCol).setValue(memo || '');
 
+  invalidateMonthsCache();
   return { success: true };
 }
 
@@ -326,6 +349,7 @@ function updateBudget(data) {
       ws.getRange(BUDGET_ROW, cat.cashCol).setValue(budget[cat.key]);
     }
   });
+  invalidateMonthsCache();
   return { success: true };
 }
 

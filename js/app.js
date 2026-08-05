@@ -94,14 +94,49 @@ async function handleLogin(e) {
 // APP INIT
 // ============================================================
 
+const MONTH_CACHE_KEY = 'kakeibo_cache_monthData';
+
+function readMonthCache() {
+  try {
+    const raw = localStorage.getItem(MONTH_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function writeMonthCache(data) {
+  try {
+    localStorage.setItem(MONTH_CACHE_KEY, JSON.stringify(data));
+  } catch (err) {
+    // 容量超過などは無視
+  }
+}
+
 async function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   const app = document.getElementById('app-screen');
   app.style.display = 'flex';
 
-  showLoading(true);
-  await loadCurrentMonth();
-  await loadAvailableMonths();
+  // 前回のデータがあれば先に描画（通信の完了を待たずに画面が出る）
+  const cached = readMonthCache();
+  if (cached) {
+    try {
+      state.monthData = cached;
+      state.currentSheet = cached.sheetName;
+      document.getElementById('header-title').textContent = cached.sheetName + ' 家計簿';
+      renderDashboard();
+    } catch (err) {
+      state.monthData = null;
+      showLoading(true);
+    }
+  } else {
+    showLoading(true);
+  }
+
+  // 2本のGAS通信を並列で実行
+  await Promise.all([loadCurrentMonth(), loadAvailableMonths()]);
+  updateAvailableSheets();
   showLoading(false);
   renderDashboard();
 }
@@ -147,6 +182,7 @@ async function loadCurrentMonth(sheetName) {
     state.monthData = res;
     state.currentSheet = res.sheetName;
     document.getElementById('header-title').textContent = res.sheetName + ' 家計簿';
+    writeMonthCache(res);
     updateAvailableSheets();
   } catch (err) {
     showToast('データ読み込みエラー: ' + err.message);
