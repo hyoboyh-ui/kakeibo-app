@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.png">
   <title>木村家 家計簿</title>
   <!-- ?v= は更新のたびに数字を上げる（ブラウザに古いファイルを使わせないため） -->
-  <link rel="stylesheet" href="css/style.css?v=20260805b">
+  <link rel="stylesheet" href="css/style.css?v=20260805c">
 </head>
 <body>
 
@@ -41,7 +41,6 @@
     <div class="header-icons">
       <select id="month-select" class="month-select-header" onchange="onMonthChange(this.value)">
       </select>
-      <button class="icon-btn" onclick="openEntryModal()" title="記録する">＋</button>
     </div>
   </header>
 
@@ -85,6 +84,10 @@
       <div class="card">
         <div class="section-title">月次予算の設定</div>
         <div id="budget-inputs"></div>
+        <div class="budget-total-row" id="budget-total-row">
+          <span class="budget-total-label">合計予算</span>
+          <span class="budget-total-value" id="budget-total-value">¥0</span>
+        </div>
         <button class="btn btn-primary mt-4" onclick="saveBudget()">予算を保存</button>
       </div>
 
@@ -171,6 +174,6 @@
 
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="js/app.js?v=20260805b"></script>
+<script src="js/app.js?v=20260805c"></script>
 </body>
 </html>

@@ -581,6 +581,18 @@ function renderBudgetInputs() {
     `;
     container.appendChild(row);
   });
+
+  container.querySelectorAll('.budget-input-field').forEach(el => {
+    el.addEventListener('input', updateBudgetTotal);
+  });
+  updateBudgetTotal();
+}
+
+function updateBudgetTotal() {
+  const total = [...document.querySelectorAll('.budget-input-field')]
+    .reduce((sum, el) => sum + (parseInt(el.value) || 0), 0);
+  const el = document.getElementById('budget-total-value');
+  if (el) el.textContent = '¥' + fmt(total);
 }
 
 async function saveBudget() {

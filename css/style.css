@@ -80,25 +80,25 @@ header {
 
 header h1 { font-size: 17px; font-weight: 700; color: #fff; }
 header .header-icons { display: flex; gap: 10px; }
-header button.icon-btn {
-  background: none; border: none; color: #fff;
-  font-size: 22px; cursor: pointer; padding: 2px;
-  line-height: 1;
-}
 
 .month-select-header {
   background: rgba(255,255,255,0.25);
   border: 1px solid rgba(255,255,255,0.5);
   color: #fff;
   border-radius: 8px;
-  padding: 4px 8px;
+  padding: 4px 22px 4px 10px;
   font-size: 13px;
   font-family: inherit;
   font-weight: 600;
   appearance: none;
   -webkit-appearance: none;
   cursor: pointer;
-  max-width: 110px;
+  min-width: 108px;
+  white-space: nowrap;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 14px;
 }
 
 .month-select-header option {
@@ -570,6 +570,70 @@ canvas { max-width: 100%; }
   font-size: 15px;
   text-align: right;
   font-family: inherit;
+}
+
+/* 予算合計表示（案A: ヘッダーと同じグラデーションのチップ型） */
+.budget-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--sky), var(--lavender));
+}
+.budget-total-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+.budget-total-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+/* 予算合計表示（案B: 上端に区切り線を引いた素の合計行。使う場合は
+   index.html の #budget-total-row に class="budget-total-row-b" を追加し、
+   案Aのクラスを外す） */
+.budget-total-row-b {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 2px solid var(--border);
+}
+.budget-total-row-b .budget-total-label {
+  color: var(--text-sub);
+}
+.budget-total-row-b .budget-total-value {
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+/* 予算合計表示（案C: 左端にアクセントバーのあるカード型。使う場合は
+   #budget-total-row に class="budget-total-row-c" を追加） */
+.budget-total-row-c {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--primary-light);
+  border-left: 4px solid var(--primary-dark);
+}
+.budget-total-row-c .budget-total-label {
+  color: var(--text-sub);
+  font-weight: 600;
+}
+.budget-total-row-c .budget-total-value {
+  color: var(--primary-dark);
+  font-size: 22px;
+  font-weight: 800;
 }
 
 /* ============================================================
