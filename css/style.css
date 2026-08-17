@@ -572,32 +572,8 @@ canvas { max-width: 100%; }
   font-family: inherit;
 }
 
-/* 予算合計表示（案A: ヘッダーと同じグラデーションのチップ型） */
+/* 予算合計表示（上端に区切り線を引いたシンプルな合計行） */
 .budget-total-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 14px;
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  background: linear-gradient(135deg, var(--sky), var(--lavender));
-}
-.budget-total-label {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-}
-.budget-total-value {
-  font-size: 22px;
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: 0.3px;
-}
-
-/* 予算合計表示（案B: 上端に区切り線を引いた素の合計行。使う場合は
-   index.html の #budget-total-row に class="budget-total-row-b" を追加し、
-   案Aのクラスを外す） */
-.budget-total-row-b {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -605,35 +581,15 @@ canvas { max-width: 100%; }
   padding-top: 14px;
   border-top: 2px solid var(--border);
 }
-.budget-total-row-b .budget-total-label {
-  color: var(--text-sub);
-}
-.budget-total-row-b .budget-total-value {
-  color: var(--text);
-  font-size: 22px;
-  font-weight: 800;
-}
-
-/* 予算合計表示（案C: 左端にアクセントバーのあるカード型。使う場合は
-   #budget-total-row に class="budget-total-row-c" を追加） */
-.budget-total-row-c {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 14px;
-  padding: 14px 16px;
-  border-radius: 8px;
-  background: var(--primary-light);
-  border-left: 4px solid var(--primary-dark);
-}
-.budget-total-row-c .budget-total-label {
-  color: var(--text-sub);
+.budget-total-label {
+  font-size: 14px;
   font-weight: 600;
+  color: var(--text-sub);
 }
-.budget-total-row-c .budget-total-value {
-  color: var(--primary-dark);
+.budget-total-value {
   font-size: 22px;
   font-weight: 800;
+  color: var(--text);
 }
 
 /* ============================================================
