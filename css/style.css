@@ -109,7 +109,6 @@ header .header-icons { display: flex; gap: 10px; }
 .main-content {
   flex: 1;
   padding: 16px;
-  overflow-y: auto;
   padding-bottom: 80px;
 }
 
@@ -337,10 +336,26 @@ select.form-control {
 ============================================================ */
 
 .history-search-row {
+  position: sticky;
+  top: 55px; /* JSでヘッダー実測値に上書きされる。読み込み直後の暫定値 */
+  z-index: 5;
   display: flex;
   gap: 8px;
   align-items: center;
-  margin-bottom: 14px;
+  background: var(--bg);
+  padding: 2px 0 12px;
+  margin-bottom: -12px;
+}
+
+/* 検索欄の直下に重ねる、カードが背景色へ溶けるように見せるフェード帯 */
+.history-fade-mask {
+  position: sticky;
+  top: 107px; /* JSでヘッダー+検索バーの実測値に上書きされる。読み込み直後の暫定値 */
+  z-index: 4;
+  height: 22px;
+  margin-bottom: -22px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, var(--bg), transparent);
 }
 
 .history-searchbox {
@@ -576,6 +591,7 @@ mark.history-hl {
   width: 100%;
   max-height: 92vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   transform: translateY(100%);
   transition: transform 0.25s ease;
 }
@@ -880,6 +896,7 @@ canvas { max-width: 100%; }
   max-width: 360px;
   max-height: 85vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   position: relative;
   transform: scale(0.9);
   transition: transform 0.2s;

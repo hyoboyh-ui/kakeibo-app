@@ -234,6 +234,24 @@ function switchView(view) {
   if (view === 'settings')  renderSettings();
 }
 
+// 文字サイズ設定などでヘッダー・検索バーの高さが変わってもフェード帯の位置がずれないよう常時実測する
+function alignHistoryFadeMask() {
+  const header = document.querySelector('header');
+  const bar = document.querySelector('.history-search-row');
+  const mask = document.getElementById('history-fade-mask');
+  if (!header || !bar || !mask) return;
+  const headerH = header.offsetHeight;
+  bar.style.top = headerH + 'px';
+  mask.style.top = (headerH + bar.offsetHeight) + 'px';
+}
+if (typeof ResizeObserver !== 'undefined') {
+  const historyObserver = new ResizeObserver(alignHistoryFadeMask);
+  const headerEl = document.querySelector('header');
+  const historyBarEl = document.querySelector('.history-search-row');
+  if (headerEl) historyObserver.observe(headerEl);
+  if (historyBarEl) historyObserver.observe(historyBarEl);
+}
+
 // ============================================================
 // DASHBOARD
 // ============================================================
@@ -418,10 +436,12 @@ function openHistoryFilterSheet() {
   };
   renderHistoryFilterSheet();
   document.getElementById('history-filter-overlay').classList.add('open');
+  lockScroll();
 }
 
 function closeHistoryFilterSheet() {
   document.getElementById('history-filter-overlay').classList.remove('open');
+  unlockScroll();
 }
 
 function toggleDraftValue(list, value) {
@@ -693,10 +713,12 @@ function openSummaryZoom(sheetName, data) {
   `;
 
   document.getElementById('summary-zoom-overlay').classList.add('open');
+  lockScroll();
 }
 
 function closeSummaryZoom() {
   document.getElementById('summary-zoom-overlay').classList.remove('open');
+  unlockScroll();
 }
 
 // ============================================================
@@ -1067,12 +1089,42 @@ function setupModal() {
   });
 }
 
+// シート/モーダル表示中に背後の画面がiOS Safariのラバーバンドで動いてしまうのを防ぐ。
+// overflow:hidden だけではiOSのバウンススクロールを止めきれないため、
+// bodyをposition:fixedで現在位置に固定する方式にしている。
+let scrollLockCount = 0;
+let scrollLockTop = 0;
+function lockScroll() {
+  if (scrollLockCount === 0) {
+    scrollLockTop = window.scrollY || document.documentElement.scrollTop || 0;
+    document.body.style.position = 'fixed';
+    document.body.style.top = -scrollLockTop + 'px';
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    document.body.style.width = '100%';
+  }
+  scrollLockCount++;
+}
+function unlockScroll() {
+  scrollLockCount = Math.max(0, scrollLockCount - 1);
+  if (scrollLockCount === 0) {
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    document.body.style.width = '';
+    window.scrollTo(0, scrollLockTop);
+  }
+}
+
 function openModal() {
   document.getElementById('modal-overlay').classList.add('open');
+  lockScroll();
 }
 
 function closeModal() {
   document.getElementById('modal-overlay').classList.remove('open');
+  unlockScroll();
 }
 
 // ============================================================
