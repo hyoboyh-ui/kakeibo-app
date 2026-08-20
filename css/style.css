@@ -27,12 +27,17 @@
   --cat-pink:  #FCF0F6;
 }
 
+html {
+  overscroll-behavior-y: none;
+}
+
 body {
   font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
   font-size: 15px;
+  overscroll-behavior-y: none;
 }
 
 /* ============================================================
@@ -347,15 +352,23 @@ select.form-control {
   margin-bottom: -12px;
 }
 
-/* 検索欄の直下に重ねる、カードが背景色へ溶けるように見せるフェード帯 */
+/* 検索欄の直下に重ねる、カードが背景色へ溶けるように見せるフェード帯。
+   カード背景色(cat-sky等)がページ背景に近い淡色のため、序盤は不透明を保って
+   はっきり隠し、後半でゆっくり透明化することで溶ける演出を強めている。 */
 .history-fade-mask {
   position: sticky;
   top: 107px; /* JSでヘッダー+検索バーの実測値に上書きされる。読み込み直後の暫定値 */
   z-index: 4;
-  height: 22px;
-  margin-bottom: -22px;
+  height: 40px;
+  margin-bottom: -40px;
   pointer-events: none;
-  background: linear-gradient(to bottom, var(--bg), transparent);
+  background: linear-gradient(
+    to bottom,
+    var(--bg) 0%,
+    var(--bg) 35%,
+    rgba(249,244,253,0.75) 60%, /* --bg(#F9F4FD)と同色。テーマ変更時はここも合わせる */
+    transparent 100%
+  );
 }
 
 .history-searchbox {

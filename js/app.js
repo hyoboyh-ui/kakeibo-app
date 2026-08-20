@@ -5,16 +5,16 @@
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbylz_Wl5dAR6hHz0DxIE-gWpAWxGbkzQZKNtkCQ41w_5gdqPZvyTcJ0TAexsTsQ1x0x/exec'; // デプロイ後に置き換え
 
 const CATEGORIES = [
-  { key: '食費',             hasMemo: false, color: 'cat-sky'   },
-  { key: '雑費',             hasMemo: false, color: 'cat-blue'  },
-  { key: '交際費(交通費)',   hasMemo: false, color: 'cat-lav'   },
-  { key: '交際費(外食)',     hasMemo: false, color: 'cat-lav'   },
-  { key: '保険代',           hasMemo: false, color: 'cat-mauve' },
-  { key: '光熱費(ガス電気)', hasMemo: false, color: 'cat-blue'  },
-  { key: '光熱費(携帯ネット)', hasMemo: false, color: 'cat-sky' },
-  { key: '水道代',           hasMemo: false, color: 'cat-lav'   },
-  { key: '緊急出費',         hasMemo: true,  color: 'cat-pink'  },
-  { key: '固定費',           hasMemo: false, color: 'cat-mauve' }
+  { key: '食費',             hasMemo: true, color: 'cat-sky'   },
+  { key: '雑費',             hasMemo: true, color: 'cat-blue'  },
+  { key: '交際費(交通費)',   hasMemo: true, color: 'cat-lav'   },
+  { key: '交際費(外食)',     hasMemo: true, color: 'cat-lav'   },
+  { key: '保険代',           hasMemo: true, color: 'cat-mauve' },
+  { key: '光熱費(ガス電気)', hasMemo: true, color: 'cat-blue'  },
+  { key: '光熱費(携帯ネット)', hasMemo: true, color: 'cat-sky' },
+  { key: '水道代',           hasMemo: true, color: 'cat-lav'   },
+  { key: '緊急出費',         hasMemo: true, color: 'cat-pink'  },
+  { key: '固定費',           hasMemo: true, color: 'cat-mauve' }
 ];
 
 const CARD_TYPES = ['三井住友', 'セゾン', 'JCB', 'その他'];
@@ -946,7 +946,7 @@ function renderEditForm(entry, cat, d) {
     ${cat.hasMemo ? `
     <div class="form-group">
       <label class="form-label">メモ</label>
-      <input type="text" class="form-control" id="edit-memo" value="${memo}" placeholder="内容">
+      <input type="text" class="form-control" id="edit-memo" value="${escapeHtml(memo)}" placeholder="内容">
     </div>` : ''}
     <button class="btn btn-primary" onclick="submitEdit()">更新する</button>
     <button class="btn btn-danger" onclick="clearEntry()" style="margin-top:10px">この項目をクリア</button>

@@ -17,6 +17,9 @@ function getSS() {
 }
 
 // 列定義
+// メモ列は既存シートとの互換性のため、各カテゴリの現金/カード/カード種類の
+// 直後ではなく末尾(34〜42列目)にまとめて追加している。
+// こうすることで、既存の月シートの列位置は一切変わらない。
 const COLS = {
   DATE: 1, DAY: 2,
   食費現金: 3, 食費カード: 4, 食費カード種類: 5,
@@ -28,20 +31,23 @@ const COLS = {
   光熱費携帯ネット現金: 21, 光熱費携帯ネットカード: 22, 光熱費携帯ネットカード種類: 23,
   水道代現金: 24, 水道代カード: 25, 水道代カード種類: 26,
   緊急出費現金: 27, 緊急出費カード: 28, 緊急出費カード種類: 29, 緊急出費メモ: 30,
-  固定費現金: 31, 固定費カード: 32, 固定費カード種類: 33
+  固定費現金: 31, 固定費カード: 32, 固定費カード種類: 33,
+  食費メモ: 34, 雑費メモ: 35, 交際費交通費メモ: 36, 交際費外食メモ: 37,
+  保険代メモ: 38, 光熱費ガス電気メモ: 39, 光熱費携帯ネットメモ: 40,
+  水道代メモ: 41, 固定費メモ: 42
 };
 
 const CATEGORIES = [
-  { key: '食費', cashCol: 3, cardCol: 4, cardTypeCol: 5 },
-  { key: '雑費', cashCol: 6, cardCol: 7, cardTypeCol: 8 },
-  { key: '交際費(交通費)', cashCol: 9, cardCol: 10, cardTypeCol: 11 },
-  { key: '交際費(外食)', cashCol: 12, cardCol: 13, cardTypeCol: 14 },
-  { key: '保険代', cashCol: 15, cardCol: 16, cardTypeCol: 17 },
-  { key: '光熱費(ガス電気)', cashCol: 18, cardCol: 19, cardTypeCol: 20 },
-  { key: '光熱費(携帯ネット)', cashCol: 21, cardCol: 22, cardTypeCol: 23 },
-  { key: '水道代', cashCol: 24, cardCol: 25, cardTypeCol: 26 },
+  { key: '食費', cashCol: 3, cardCol: 4, cardTypeCol: 5, memoCol: 34 },
+  { key: '雑費', cashCol: 6, cardCol: 7, cardTypeCol: 8, memoCol: 35 },
+  { key: '交際費(交通費)', cashCol: 9, cardCol: 10, cardTypeCol: 11, memoCol: 36 },
+  { key: '交際費(外食)', cashCol: 12, cardCol: 13, cardTypeCol: 14, memoCol: 37 },
+  { key: '保険代', cashCol: 15, cardCol: 16, cardTypeCol: 17, memoCol: 38 },
+  { key: '光熱費(ガス電気)', cashCol: 18, cardCol: 19, cardTypeCol: 20, memoCol: 39 },
+  { key: '光熱費(携帯ネット)', cashCol: 21, cardCol: 22, cardTypeCol: 23, memoCol: 40 },
+  { key: '水道代', cashCol: 24, cardCol: 25, cardTypeCol: 26, memoCol: 41 },
   { key: '緊急出費', cashCol: 27, cardCol: 28, cardTypeCol: 29, memoCol: 30 },
-  { key: '固定費', cashCol: 31, cardCol: 32, cardTypeCol: 33 }
+  { key: '固定費', cashCol: 31, cardCol: 32, cardTypeCol: 33, memoCol: 42 }
 ];
 
 const HEADERS = [
@@ -55,13 +61,16 @@ const HEADERS = [
   '光熱費(携帯ネット)現金', '光熱費(携帯ネット)カード', '光熱費(携帯ネット)カード種類',
   '水道代現金', '水道代カード', '水道代カード種類',
   '緊急出費現金', '緊急出費カード', '緊急出費カード種類', '緊急出費メモ',
-  '固定費現金', '固定費カード', '固定費カード種類'
+  '固定費現金', '固定費カード', '固定費カード種類',
+  '食費メモ', '雑費メモ', '交際費(交通費)メモ', '交際費(外食)メモ',
+  '保険代メモ', '光熱費(ガス電気)メモ', '光熱費(携帯ネット)メモ',
+  '水道代メモ', '固定費メモ'
 ];
 
 const DAYS_JP = ['日', '月', '火', '水', '木', '金', '土'];
 const DATA_START_ROW = 5;
 const BUDGET_ROW = 3;
-const TOTAL_COLS = 33;
+const TOTAL_COLS = 42;
 
 // ============================================================
 // エントリポイント
