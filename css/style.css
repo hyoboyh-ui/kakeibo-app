@@ -27,17 +27,16 @@
   --cat-pink:  #FCF0F6;
 }
 
-html {
-  overscroll-behavior-y: none;
+html, body {
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
   font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
   background: var(--bg);
   color: var(--text);
-  min-height: 100vh;
   font-size: 15px;
-  overscroll-behavior-y: none;
 }
 
 /* ============================================================
@@ -68,7 +67,12 @@ body {
 /* ============================================================
    APP SHELL
 ============================================================ */
-#app-screen { display: none; flex-direction: column; min-height: 100vh; }
+#app-screen {
+  display: none;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh; /* iOSのアドレスバー表示/非表示による高さ変動に追従 */
+}
 
 header {
   background: linear-gradient(120deg, #84C9EF 0%, #CBBDDD 100%);
@@ -113,8 +117,12 @@ header .header-icons { display: flex; gap: 10px; }
 
 .main-content {
   flex: 1;
+  min-height: 0; /* flexアイテムの最小高さがコンテンツ量になるのを防ぎ、overflowを効かせる */
   padding: 16px;
   padding-bottom: 80px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ============================================================
@@ -342,25 +350,25 @@ select.form-control {
 
 .history-search-row {
   position: sticky;
-  top: 55px; /* JSでヘッダー実測値に上書きされる。読み込み直後の暫定値 */
+  top: 0; /* .main-content が実スクロール領域になったため、そのままで密着する */
   z-index: 5;
   display: flex;
   gap: 8px;
   align-items: center;
   background: var(--bg);
   padding: 2px 0 12px;
-  margin-bottom: -12px;
 }
 
 /* 検索欄の直下に重ねる、カードが背景色へ溶けるように見せるフェード帯。
    カード背景色(cat-sky等)がページ背景に近い淡色のため、序盤は不透明を保って
-   はっきり隠し、後半でゆっくり透明化することで溶ける演出を強めている。 */
+   はっきり隠し、後半でゆっくり透明化することで溶ける演出を強めている。
+   負のmarginで内容と重ねず、実スペースとして確保することで、スクロール前
+   の初期表示で最初のカードの日付がマスクに隠れないようにしている。 */
 .history-fade-mask {
   position: sticky;
-  top: 107px; /* JSでヘッダー+検索バーの実測値に上書きされる。読み込み直後の暫定値 */
+  top: 0; /* JSで検索バーの実測高さに上書きされる。読み込み直後の暫定値 */
   z-index: 4;
   height: 40px;
-  margin-bottom: -40px;
   pointer-events: none;
   background: linear-gradient(
     to bottom,

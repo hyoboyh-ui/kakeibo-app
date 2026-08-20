@@ -232,24 +232,23 @@ function switchView(view) {
   if (view === 'summary')   renderSummary();
   if (view === 'chart')     renderChart();
   if (view === 'settings')  renderSettings();
+  // hidden(display:none)から表示に切り替わった直後はResizeObserverの発火を
+  // 待たず、確実にフェード帯の位置を合わせる
+  if (view === 'history')   requestAnimationFrame(alignHistoryFadeMask);
 }
 
-// 文字サイズ設定などでヘッダー・検索バーの高さが変わってもフェード帯の位置がずれないよう常時実測する
+// 文字サイズ設定などで検索バーの高さが変わってもフェード帯の位置がずれないよう常時実測する。
+// .main-content が実スクロール領域のため、検索バーは top:0 で密着済み。
+// マスクはその直下(バーの高さ分)に配置する。
 function alignHistoryFadeMask() {
-  const header = document.querySelector('header');
   const bar = document.querySelector('.history-search-row');
   const mask = document.getElementById('history-fade-mask');
-  if (!header || !bar || !mask) return;
-  const headerH = header.offsetHeight;
-  bar.style.top = headerH + 'px';
-  mask.style.top = (headerH + bar.offsetHeight) + 'px';
+  if (!bar || !mask) return;
+  mask.style.top = bar.offsetHeight + 'px';
 }
 if (typeof ResizeObserver !== 'undefined') {
-  const historyObserver = new ResizeObserver(alignHistoryFadeMask);
-  const headerEl = document.querySelector('header');
   const historyBarEl = document.querySelector('.history-search-row');
-  if (headerEl) historyObserver.observe(headerEl);
-  if (historyBarEl) historyObserver.observe(historyBarEl);
+  if (historyBarEl) new ResizeObserver(alignHistoryFadeMask).observe(historyBarEl);
 }
 
 // ============================================================
@@ -1090,30 +1089,22 @@ function setupModal() {
 }
 
 // シート/モーダル表示中に背後の画面がiOS Safariのラバーバンドで動いてしまうのを防ぐ。
-// overflow:hidden だけではiOSのバウンススクロールを止めきれないため、
-// bodyをposition:fixedで現在位置に固定する方式にしている。
+// 実スクロール領域である .main-content の overflow を止め、位置を復元する。
 let scrollLockCount = 0;
 let scrollLockTop = 0;
 function lockScroll() {
   if (scrollLockCount === 0) {
-    scrollLockTop = window.scrollY || document.documentElement.scrollTop || 0;
-    document.body.style.position = 'fixed';
-    document.body.style.top = -scrollLockTop + 'px';
-    document.body.style.left = '0';
-    document.body.style.right = '0';
-    document.body.style.width = '100%';
+    const mc = document.querySelector('.main-content');
+    scrollLockTop = mc ? mc.scrollTop : 0;
+    if (mc) mc.style.overflow = 'hidden';
   }
   scrollLockCount++;
 }
 function unlockScroll() {
   scrollLockCount = Math.max(0, scrollLockCount - 1);
   if (scrollLockCount === 0) {
-    document.body.style.position = '';
-    document.body.style.top = '';
-    document.body.style.left = '';
-    document.body.style.right = '';
-    document.body.style.width = '';
-    window.scrollTo(0, scrollLockTop);
+    const mc = document.querySelector('.main-content');
+    if (mc) { mc.style.overflow = ''; mc.scrollTop = scrollLockTop; }
   }
 }
 
