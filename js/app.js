@@ -32,7 +32,10 @@ const state = {
   chartData: null,
   summaryData: null,
   allMonths: null,
-  currentView: 'dashboard'
+  currentView: 'dashboard',
+  historySearch: '',
+  historyFilter: { categories: [], payments: [], cardTypes: [] },
+  historyFilterDraft: { categories: [], payments: [], cardTypes: [] }
 };
 
 // ============================================================
@@ -285,12 +288,32 @@ function renderDashboard() {
 // HISTORY
 // ============================================================
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// 検索語に一致した部分だけ <mark> で強調（文字列はエスケープ済みの上で処理）
+function highlightMatch(text, term) {
+  const escaped = escapeHtml(text);
+  if (!term) return escaped;
+  const idx = escaped.toLowerCase().indexOf(escapeHtml(term).toLowerCase());
+  if (idx === -1) return escaped;
+  return escaped.slice(0, idx)
+    + '<mark class="history-hl">' + escaped.slice(idx, idx + term.length) + '</mark>'
+    + escaped.slice(idx + term.length);
+}
+
 function renderHistory() {
   const container = document.getElementById('history-list');
   if (!state.monthData) return;
 
   const { entries } = state.monthData;
   container.innerHTML = '';
+
+  const { categories: catFilter, payments: paymentFilter, cardTypes: cardTypeFilter } = state.historyFilter;
+  const search = state.historySearch.trim().toLowerCase();
 
   // 入力済みの行だけ表示
   const filled = entries.filter(entry =>
@@ -300,13 +323,7 @@ function renderHistory() {
     })
   ).reverse();
 
-  if (filled.length === 0) {
-    container.innerHTML = `<div class="empty-state">
-      <div class="empty-icon">📋</div>
-      <p>まだ記録がありません</p>
-    </div>`;
-    return;
-  }
+  let renderedCount = 0;
 
   filled.forEach(entry => {
     const group = document.createElement('div');
@@ -325,19 +342,32 @@ function renderHistory() {
       </div>
     `;
 
+    let groupHasItem = false;
+
     CATEGORIES.forEach(cat => {
       const d = entry[cat.key];
       if (!d || ((d.現金 || 0) + (d.カード || 0)) === 0) return;
+      if (catFilter.length > 0 && !catFilter.includes(cat.key)) return;
 
-      const hasCash = (d.現金 || 0) > 0;
-      const hasCard = (d.カード || 0) > 0;
+      const hasCash = (d.現金 || 0) > 0 && (paymentFilter.length === 0 || paymentFilter.includes('現金'));
+      const hasCard = (d.カード || 0) > 0 && (paymentFilter.length === 0 || paymentFilter.includes('カード'))
+        && (cardTypeFilter.length === 0 || cardTypeFilter.includes(d.カード種類));
+      if (!hasCash && !hasCard) return;
+
+      const memoText = d.メモ || '';
+      if (search) {
+        const haystack = (cat.key + ' ' + memoText + ' ' + (d.カード種類 || '')).toLowerCase();
+        if (!haystack.includes(search)) return;
+      }
+
+      groupHasItem = true;
       const item = document.createElement('div');
       item.className = `entry-item ${cat.color || ''}`;
       item.innerHTML = `
         <div style="flex:1">
-          <div class="entry-cat">${cat.key}</div>
-          ${d.カード種類 ? `<div class="entry-cat-sub">${d.カード種類}</div>` : ''}
-          ${d.メモ ? `<div class="entry-cat-sub">📝 ${d.メモ}</div>` : ''}
+          <div class="entry-cat">${highlightMatch(cat.key, search)}</div>
+          ${d.カード種類 ? `<div class="entry-cat-sub">${highlightMatch(d.カード種類, search)}</div>` : ''}
+          ${memoText ? `<div class="entry-cat-sub">📝 ${highlightMatch(memoText, search)}</div>` : ''}
         </div>
         <div class="entry-amount">
           ${hasCash ? `<div>¥${fmt(d.現金)} <span class="payment-badge badge-cash"><img src="icons/cash.png" class="payment-icon-small"> 現金</span></div>` : ''}
@@ -349,8 +379,119 @@ function renderHistory() {
       group.appendChild(item);
     });
 
-    container.appendChild(group);
+    if (groupHasItem) {
+      renderedCount++;
+      container.appendChild(group);
+    }
   });
+
+  if (renderedCount === 0) {
+    const hasFilter = catFilter.length > 0 || paymentFilter.length > 0 || cardTypeFilter.length > 0 || search;
+    container.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">${hasFilter ? '🔍' : '📋'}</div>
+      <p>${hasFilter ? '該当する記録がありません' : 'まだ記録がありません'}</p>
+    </div>`;
+  }
+}
+
+function onHistorySearchInput(value) {
+  state.historySearch = value;
+  renderHistory();
+}
+
+// ============================================================
+// HISTORY FILTER SHEET
+// ============================================================
+
+function updateHistoryFilterDot() {
+  const { categories, payments, cardTypes } = state.historyFilter;
+  const active = categories.length + payments.length + cardTypes.length > 0;
+  document.getElementById('history-filter-dot').classList.toggle('hidden', !active);
+}
+
+function openHistoryFilterSheet() {
+  // 現在適用中のフィルターを下書きにコピーしてから編集する
+  state.historyFilterDraft = {
+    categories: [...state.historyFilter.categories],
+    payments: [...state.historyFilter.payments],
+    cardTypes: [...state.historyFilter.cardTypes]
+  };
+  renderHistoryFilterSheet();
+  document.getElementById('history-filter-overlay').classList.add('open');
+}
+
+function closeHistoryFilterSheet() {
+  document.getElementById('history-filter-overlay').classList.remove('open');
+}
+
+function toggleDraftValue(list, value) {
+  const i = list.indexOf(value);
+  if (i === -1) list.push(value); else list.splice(i, 1);
+}
+
+function renderHistoryFilterSheet() {
+  const draft = state.historyFilterDraft;
+
+  const catGrid = document.getElementById('filter-cat-grid');
+  catGrid.innerHTML = '';
+  CATEGORIES.forEach(cat => {
+    const chip = document.createElement('div');
+    chip.className = `filter-cat-chip ${draft.categories.includes(cat.key) ? 'selected' : ''}`;
+    chip.innerHTML = `<span>${cat.key}</span><span class="check">✓</span>`;
+    chip.addEventListener('click', () => {
+      toggleDraftValue(draft.categories, cat.key);
+      renderHistoryFilterSheet();
+    });
+    catGrid.appendChild(chip);
+  });
+
+  const paymentRow = document.getElementById('filter-payment-row');
+  paymentRow.innerHTML = '';
+  ['現金', 'カード'].forEach(p => {
+    const chip = document.createElement('div');
+    chip.className = `filter-chip ${draft.payments.includes(p) ? 'selected' : ''}`;
+    chip.innerHTML = `<span>${p}</span><span class="check">✓</span>`;
+    chip.addEventListener('click', () => {
+      toggleDraftValue(draft.payments, p);
+      renderHistoryFilterSheet();
+    });
+    paymentRow.appendChild(chip);
+  });
+
+  const cardTypeRow = document.getElementById('filter-cardtype-row');
+  cardTypeRow.innerHTML = '';
+  CARD_TYPES.forEach(t => {
+    const chip = document.createElement('div');
+    chip.className = `filter-chip ${draft.cardTypes.includes(t) ? 'selected' : ''}`;
+    chip.innerHTML = `<span>${t}</span><span class="check">✓</span>`;
+    chip.addEventListener('click', () => {
+      toggleDraftValue(draft.cardTypes, t);
+      renderHistoryFilterSheet();
+    });
+    cardTypeRow.appendChild(chip);
+  });
+
+  const total = draft.categories.length + draft.payments.length + draft.cardTypes.length;
+  document.getElementById('filter-apply-btn').textContent = total > 0 ? `絞り込む(${total})` : '絞り込む';
+}
+
+function applyHistoryFilter() {
+  state.historyFilter = {
+    categories: [...state.historyFilterDraft.categories],
+    payments: [...state.historyFilterDraft.payments],
+    cardTypes: [...state.historyFilterDraft.cardTypes]
+  };
+  updateHistoryFilterDot();
+  renderHistory();
+  closeHistoryFilterSheet();
+}
+
+function resetHistoryFilter() {
+  state.historyFilterDraft = { categories: [], payments: [], cardTypes: [] };
+  state.historyFilter = { categories: [], payments: [], cardTypes: [] };
+  updateHistoryFilterDot();
+  renderHistoryFilterSheet();
+  renderHistory();
 }
 
 // ============================================================

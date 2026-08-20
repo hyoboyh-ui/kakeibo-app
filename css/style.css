@@ -335,6 +335,128 @@ select.form-control {
 /* ============================================================
    ENTRY LIST (History)
 ============================================================ */
+
+.history-search-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.history-searchbox {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 8px 14px;
+}
+
+.history-searchbox svg { flex-shrink: 0; color: var(--text-sub); }
+
+.history-searchbox input {
+  border: none;
+  outline: none;
+  flex: 1;
+  font-size: 14px;
+  font-family: inherit;
+  background: transparent;
+  color: var(--text);
+}
+
+.history-filter-btn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.history-filter-dot {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.filter-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-sub);
+  margin: 16px 0 8px;
+}
+.filter-section-title:first-of-type { margin-top: 0; }
+
+.filter-cat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.filter-cat-chip, .filter-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--card-bg);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.filter-cat-chip.selected, .filter-chip.selected {
+  border-color: var(--primary-dark);
+  background: var(--primary-light);
+}
+
+.filter-cat-chip .check, .filter-chip .check {
+  color: var(--primary-dark);
+  font-weight: 700;
+  visibility: hidden;
+}
+.filter-cat-chip.selected .check, .filter-chip.selected .check { visibility: visible; }
+
+.filter-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-chip {
+  border-radius: 20px;
+  padding: 7px 16px;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+}
+.filter-actions .btn { margin-top: 0; flex: 1; }
+.filter-actions .btn-ghost { flex: 1; }
+.filter-actions .btn-primary { flex: 2; }
+
+mark.history-hl {
+  background: none;
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .day-group { margin-bottom: 16px; }
 
 .day-header {
