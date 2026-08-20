@@ -238,13 +238,17 @@ function switchView(view) {
 }
 
 // 文字サイズ設定などで検索バーの高さが変わってもフェード帯の位置がずれないよう常時実測する。
-// .main-content が実スクロール領域のため、検索バーは top:0 で密着済み。
-// マスクはその直下(バーの高さ分)に配置する。
+// 検索バーは .main-content の padding-top 分だけ負のオフセットを付けて
+// ヘッダー下端まで隙間なく食い込ませている。マスクの位置合わせも同じ
+// 負のオフセットを差し引いて計算する必要がある。
 function alignHistoryFadeMask() {
+  const mc = document.querySelector('.main-content');
   const bar = document.querySelector('.history-search-row');
   const mask = document.getElementById('history-fade-mask');
-  if (!bar || !mask) return;
-  mask.style.top = bar.offsetHeight + 'px';
+  if (!mc || !bar || !mask) return;
+  const mcPaddingTop = parseFloat(getComputedStyle(mc).paddingTop) || 0;
+  bar.style.top = -mcPaddingTop + 'px';
+  mask.style.top = (bar.offsetHeight - mcPaddingTop) + 'px';
 }
 if (typeof ResizeObserver !== 'undefined') {
   const historyBarEl = document.querySelector('.history-search-row');

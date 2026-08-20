@@ -350,7 +350,11 @@ select.form-control {
 
 .history-search-row {
   position: sticky;
-  top: 0; /* .main-content が実スクロール領域になったため、そのままで密着する */
+  /* .main-content の padding-top 分だけ負のオフセットにして、ヘッダー下端
+     まで隙間なく食い込ませる(JSで正確な値に上書きされる)。この隙間があると、
+     スクロール中にカードがマスク/バーに隠れた後、隙間を通過する一瞬だけ
+     再び見えてしまっていた。 */
+  top: -16px;
   z-index: 5;
   display: flex;
   gap: 8px;
