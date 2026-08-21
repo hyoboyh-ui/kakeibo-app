@@ -107,7 +107,17 @@ const PASSWORD_PROP = 'PASSWORD_RECORD';    // { salt, hash, iterations, updated
 const SESSIONS_PROP = 'SESSIONS';           // { token: 有効期限(ms), ... }
 const LEGACY_SECRET_PROP = 'API_SECRET';    // 旧方式。もう読まない（setupPasswordで削除する）
 
-const PWD_ITERATIONS = 12000;   // 反復回数。記録側に持たせているので後から変更してよい
+// 反復回数。GASの computeDigest は1回あたり約0.9msと遅く、12000回で約11秒かかった
+// （2026-08-22実測）。ログイン体感を優先して2000回＝約1.8秒に下げている。
+//
+// この回数はここでは主役ではない。ハッシュを読めるのはスクリプト所有者だけで、
+// そこまで入られていればシート本体が見えている。現実的な脅威はWeb経由の推測であり、
+// それは下の LOGIN_FAIL_MAX による回数制限が防いでいる。反復SHA-256はGPUでの
+// 総当たりには回数を増やしても大差なく弱いので、効いているのはソルトと回数制限。
+//
+// 値は setupPassword 実行時にパスワード記録へ焼き付く。変えるときは
+// benchmarkHash() で測ってから setupPassword をやり直すこと（順番が逆だと反映されない）。
+const PWD_ITERATIONS = 2000;
 const TOKEN_TTL_DAYS = 90;      // トークンの有効期間
 const TOKEN_RENEW_DAYS = 30;    // 残りがこれを切ったら自動で延長する
 const MAX_SESSIONS = 20;        // 保持する端末数の上限（古いものから捨てる）
