@@ -91,6 +91,8 @@ function doPost(e) {
       case 'updateBudget':    result = updateBudget(data);              break;
       case 'getAllMonths':     result = getAllMonthsData();              break;
       case 'checkNewSheet':   result = checkAndCreateNewSheet();        break;
+      case 'updateLogItem':   result = updateLogItem(data);             break;
+      case 'deleteLogItem':   result = deleteLogItem(data);             break;
       default: result = { error: 'Unknown action' };
     }
     return ContentService
@@ -197,6 +199,139 @@ function columnLetter(n) {
 }
 
 // ============================================================
+// 取引ログ（1回ごとの記録を個別に残す、月シートとは別の追記専用シート）
+//
+// 月シート側の集計セル(cashCol/cardCol)はこれまで通り合計値を持たせ続ける
+// （予算・グラフ・集計はこのセルだけを見ているため無停止で動く）。
+// このログは履歴ページで「同じ日の内訳」を個別表示するための追加データで、
+// 過去（このログが存在する前）の記録には対応する行がないため、履歴側は
+// 「集計セルの合計 - ログの合計」を差分として1行にまとめて表示する。
+// ============================================================
+
+const LOG_SHEET_NAME = '取引ログ';
+const LOG_HEADERS = ['id', 'sheetName', 'date', 'category', 'paymentMethod', 'cardType', 'amount', 'memo', 'recordedAt', 'deleted'];
+
+function getLogSheet() {
+  const ss = getSS();
+  let ws = ss.getSheetByName(LOG_SHEET_NAME);
+  if (!ws) {
+    ws = ss.insertSheet(LOG_SHEET_NAME);
+    ws.getRange(1, 1, 1, LOG_HEADERS.length).setValues([LOG_HEADERS]);
+    ws.setFrozenRows(1);
+    ws.hideSheet();
+  }
+  return ws;
+}
+
+function appendLogItem({ sheetName, date, category, paymentMethod, cardType, amount, memo }) {
+  const ws = getLogSheet();
+  const id = Utilities.getUuid();
+  ws.appendRow([id, sheetName, date, category, paymentMethod, cardType || '', amount, memo || '', new Date(), false]);
+  return id;
+}
+
+// sheetName(月シート名)に属する、削除されていないログ行だけを取得
+function getLogRows(sheetName) {
+  const ws = getLogSheet();
+  const lastRow = ws.getLastRow();
+  if (lastRow < 2) return [];
+  const values = ws.getRange(2, 1, lastRow - 1, LOG_HEADERS.length).getValues();
+  const rows = [];
+  values.forEach((row, i) => {
+    if (row[1] !== sheetName || row[9] === true) return;
+    rows.push({
+      rowIndex: i + 2,
+      id: row[0], sheetName: row[1], date: row[2], category: row[3],
+      paymentMethod: row[4], cardType: row[5] || '', amount: row[6] || 0,
+      memo: row[7] || '', recordedAt: row[8]
+    });
+  });
+  return rows;
+}
+
+function findLogRowById(id) {
+  const ws = getLogSheet();
+  const lastRow = ws.getLastRow();
+  if (lastRow < 2) return null;
+  const ids = ws.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (ids[i][0] === id) return { ws, rowIndex: i + 2 };
+  }
+  return null;
+}
+
+function updateLogItem(data) {
+  const { id, amount, cardType, memo } = data;
+  const found = findLogRowById(id);
+  if (!found) return { error: '記録が見つかりません' };
+  const { ws, rowIndex } = found;
+  const row = ws.getRange(rowIndex, 1, 1, LOG_HEADERS.length).getValues()[0];
+  const [, sheetName, date, category, paymentMethod, oldCardType, oldAmount] = row;
+
+  const monthWs = getSS().getSheetByName(sheetName);
+  if (!monthWs) return { error: '月シートが見つかりません' };
+  const cat = CATEGORIES.find(c => c.key === category);
+  if (!cat) return { error: `カテゴリが見つかりません: ${category}` };
+
+  const targetRow = findDateRow(monthWs, date);
+  if (targetRow === -1) return { error: `日付が見つかりません: ${date}` };
+
+  const colIdx = paymentMethod === '現金' ? cat.cashCol : cat.cardCol;
+  const delta = (amount || 0) - (oldAmount || 0);
+  const cellValue = monthWs.getRange(targetRow, colIdx).getValue() || 0;
+  monthWs.getRange(targetRow, colIdx).setValue((typeof cellValue === 'number' ? cellValue : 0) + delta);
+
+  if (paymentMethod === 'カード' && cardType !== undefined && cardType !== oldCardType) {
+    monthWs.getRange(targetRow, cat.cardTypeCol).setValue(cardType || '');
+  }
+
+  ws.getRange(rowIndex, 7).setValue(amount || 0);
+  ws.getRange(rowIndex, 6).setValue(cardType || '');
+  ws.getRange(rowIndex, 8).setValue(memo || '');
+
+  invalidateMonthsCache();
+  return { success: true };
+}
+
+function deleteLogItem(data) {
+  const { id } = data;
+  const found = findLogRowById(id);
+  if (!found) return { error: '記録が見つかりません' };
+  const { ws, rowIndex } = found;
+  const row = ws.getRange(rowIndex, 1, 1, LOG_HEADERS.length).getValues()[0];
+  const [, sheetName, date, category, paymentMethod, , amount] = row;
+
+  const monthWs = getSS().getSheetByName(sheetName);
+  const cat = CATEGORIES.find(c => c.key === category);
+  if (monthWs && cat) {
+    const targetRow = findDateRow(monthWs, date);
+    if (targetRow !== -1) {
+      const colIdx = paymentMethod === '現金' ? cat.cashCol : cat.cardCol;
+      const cellValue = monthWs.getRange(targetRow, colIdx).getValue() || 0;
+      monthWs.getRange(targetRow, colIdx).setValue(Math.max(0, (typeof cellValue === 'number' ? cellValue : 0) - (amount || 0)));
+    }
+  }
+
+  ws.getRange(rowIndex, 10).setValue(true);
+  invalidateMonthsCache();
+  return { success: true };
+}
+
+// 月シート内で指定日付に対応する行番号を探す（見つからなければ-1）
+function findDateRow(ws, date) {
+  const lastRow = ws.getLastRow();
+  const dateCol = ws.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW, 1).getValues();
+  for (let i = 0; i < dateCol.length; i++) {
+    const cellDate = dateCol[i][0];
+    const cellStr = cellDate instanceof Date
+      ? Utilities.formatDate(cellDate, 'Asia/Tokyo', 'yyyy/MM/dd')
+      : String(cellDate);
+    if (cellStr === date) return DATA_START_ROW + i;
+  }
+  return -1;
+}
+
+// ============================================================
 // データ取得
 // ============================================================
 
@@ -210,6 +345,23 @@ function getMonthData(sheetName) {
   const allData = ws.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, TOTAL_COLS).getValues();
   const budgetData = ws.getRange(BUDGET_ROW, 1, 1, TOTAL_COLS).getValues()[0];
 
+  // 日付+カテゴリごとに個別記録をまとめておく（取引ログ由来）
+  const logByDateCategory = {};
+  getLogRows(name).forEach(item => {
+    const k = item.date + '|' + item.category;
+    if (!logByDateCategory[k]) logByDateCategory[k] = [];
+    logByDateCategory[k].push({
+      id: item.id,
+      paymentMethod: item.paymentMethod,
+      cardType: item.cardType,
+      amount: item.amount,
+      memo: item.memo,
+      time: item.recordedAt instanceof Date
+        ? Utilities.formatDate(item.recordedAt, 'Asia/Tokyo', 'HH:mm')
+        : ''
+    });
+  });
+
   const entries = [];
   allData.forEach((row, i) => {
     if (!row[0] || row[0] === '集計') return;
@@ -222,7 +374,8 @@ function getMonthData(sheetName) {
       entry[cat.key] = {
         現金: row[cat.cashCol - 1] || 0,
         カード: row[cat.cardCol - 1] || 0,
-        カード種類: row[cat.cardTypeCol - 1] || ''
+        カード種類: row[cat.cardTypeCol - 1] || '',
+        items: logByDateCategory[dateStr + '|' + cat.key] || []
       };
       if (cat.memoCol) entry[cat.key].メモ = row[cat.memoCol - 1] || '';
     });
@@ -310,17 +463,7 @@ function saveEntry(data) {
   const cat = CATEGORIES.find(c => c.key === category);
   if (!cat) return { error: `カテゴリが見つかりません: ${category}` };
 
-  // 日付に対応する行を探す
-  const lastRow = ws.getLastRow();
-  const dateCol = ws.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW, 1).getValues();
-  let targetRow = -1;
-  for (let i = 0; i < dateCol.length; i++) {
-    const cellDate = dateCol[i][0];
-    const cellStr = cellDate instanceof Date
-      ? Utilities.formatDate(cellDate, 'Asia/Tokyo', 'yyyy/MM/dd')
-      : String(cellDate);
-    if (cellStr === date) { targetRow = DATA_START_ROW + i; break; }
-  }
+  const targetRow = findDateRow(ws, date);
   if (targetRow === -1) return { error: `日付が見つかりません: ${date}` };
 
   const colIdx = paymentMethod === '現金' ? cat.cashCol : cat.cardCol;
@@ -334,6 +477,8 @@ function saveEntry(data) {
     const existingMemo = ws.getRange(targetRow, cat.memoCol).getValue() || '';
     ws.getRange(targetRow, cat.memoCol).setValue(existingMemo ? existingMemo + ' / ' + memo : memo);
   }
+
+  appendLogItem({ sheetName: name, date, category, paymentMethod, cardType, amount, memo });
 
   invalidateMonthsCache();
   return { success: true };

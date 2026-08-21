@@ -563,15 +563,86 @@ mark.history-hl {
   text-align: right;
 }
 
-.entry-amount .payment-badge {
+.payment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 10px;
+  font-weight: 600;
   padding: 2px 6px;
   border-radius: 99px;
-  margin-left: 6px;
 }
+
+.entry-amount .payment-badge { margin-left: 6px; }
 
 .badge-cash { background: #E8F6FD; color: #4A8BB0; }
 .badge-card { background: #EDE8F8; color: #7A5BAF; }
+
+/* ============================================================
+   ENTRY LIST - 同日同カテゴリの複数記録を個別表示するカード（案1）
+============================================================ */
+.entry-item-multi {
+  display: block;
+  padding: 12px 14px;
+}
+
+.entry-multi-cat {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.entry-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  cursor: pointer;
+}
+
+.entry-line + .entry-line,
+.entry-line-wrap + .entry-line-wrap {
+  border-top: 1px solid rgba(155, 125, 200, 0.15);
+}
+
+.entry-line-time {
+  font-size: 11px;
+  color: var(--text-sub);
+  flex-shrink: 0;
+}
+
+.entry-line-amount {
+  font-size: 14px;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.entry-line-memo {
+  font-size: 11px;
+  color: var(--text-sub);
+  padding: 0 0 7px 0;
+  margin-top: -3px;
+}
+
+.entry-residual-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+  font-size: 12px;
+  color: var(--text-sub);
+  border-top: 1px solid rgba(155, 125, 200, 0.15);
+}
+
+.entry-total-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--lavender);
+  font-size: 13px;
+  font-weight: 700;
+}
 
 .payment-icon-small {
   width: 13px;

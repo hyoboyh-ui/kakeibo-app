@@ -29,6 +29,7 @@ const state = {
   availableSheets: [],
   selectedDate: null,
   editingEntry: null,
+  editingLogItem: null,
   chartData: null,
   summaryData: null,
   allMonths: null,
@@ -370,6 +371,66 @@ function renderHistory() {
       if (!d || ((d.現金 || 0) + (d.カード || 0)) === 0) return;
       if (catFilter.length > 0 && !catFilter.includes(cat.key)) return;
 
+      const hasFilterOrSearch = paymentFilter.length > 0 || cardTypeFilter.length > 0 || !!search;
+      const items = d.items || [];
+
+      // 個別記録(取引ログ)がある場合は明細を1行ずつ表示する
+      if (items.length > 0) {
+        const visibleItems = items.filter(it => {
+          if (paymentFilter.length > 0 && !paymentFilter.includes(it.paymentMethod)) return false;
+          if (it.paymentMethod === 'カード' && cardTypeFilter.length > 0 && !cardTypeFilter.includes(it.cardType)) return false;
+          if (search) {
+            const haystack = (cat.key + ' ' + (it.memo || '') + ' ' + (it.cardType || '')).toLowerCase();
+            if (!haystack.includes(search)) return false;
+          }
+          return true;
+        });
+        if (visibleItems.length === 0) return;
+
+        // 集計セルの合計 - ログ記録済みの合計 = このログ導入前からの未記録分
+        const loggedCash = items.filter(it => it.paymentMethod === '現金').reduce((s, it) => s + it.amount, 0);
+        const loggedCard = items.filter(it => it.paymentMethod === 'カード').reduce((s, it) => s + it.amount, 0);
+        const residualCash = Math.max(0, (d.現金 || 0) - loggedCash);
+        const residualCard = Math.max(0, (d.カード || 0) - loggedCard);
+        const showResidual = !hasFilterOrSearch && (residualCash > 0 || residualCard > 0);
+
+        groupHasItem = true;
+        const card = document.createElement('div');
+        card.className = `entry-item entry-item-multi ${cat.color || ''}`;
+
+        let linesHtml = '';
+        let total = 0;
+        visibleItems.forEach(it => {
+          total += it.amount;
+          const badgeClass = it.paymentMethod === '現金' ? 'badge-cash' : 'badge-card';
+          const icon = it.paymentMethod === '現金' ? 'icons/cash.png' : 'icons/card.png';
+          const label = it.paymentMethod === '現金' ? '現金' : (it.cardType || 'カード');
+          linesHtml += `
+            <div class="entry-line" data-id="${it.id}">
+              <span class="entry-line-time">${it.time || ''}</span>
+              <span class="payment-badge ${badgeClass}"><img src="${icon}" class="payment-icon-small"> ${highlightMatch(label, search)}</span>
+              <span class="entry-line-amount">¥${fmt(it.amount)}</span>
+            </div>
+            ${it.memo ? `<div class="entry-line-memo">📝 ${highlightMatch(it.memo, search)}</div>` : ''}
+          `;
+        });
+        if (showResidual) total += residualCash + residualCard;
+
+        card.innerHTML = `
+          <div class="entry-multi-cat">${highlightMatch(cat.key, search)}</div>
+          ${linesHtml}
+          ${showResidual ? `<div class="entry-residual-line"><span>それ以前の記録</span><span>¥${fmt(residualCash + residualCard)}</span></div>` : ''}
+          <div class="entry-total-row"><span>合計</span><span>¥${fmt(total)}</span></div>
+        `;
+        card.querySelectorAll('.entry-line').forEach(lineEl => {
+          const it = visibleItems.find(v => v.id === lineEl.dataset.id);
+          if (it) lineEl.addEventListener('click', () => openEditLogItemModal(it, cat.key, entry.date));
+        });
+        group.appendChild(card);
+        return;
+      }
+
+      // 個別記録が無い（この機能より前の記録）場合は従来通り集計を1行表示
       const hasCash = (d.現金 || 0) > 0 && (paymentFilter.length === 0 || paymentFilter.includes('現金'));
       const hasCard = (d.カード || 0) > 0 && (paymentFilter.length === 0 || paymentFilter.includes('カード'))
         && (cardTypeFilter.length === 0 || cardTypeFilter.includes(d.カード種類));
@@ -1073,6 +1134,91 @@ async function clearEntry() {
     await loadCurrentMonth(state.currentSheet);
     closeModal();
     showToast('クリアしました');
+    renderHistory();
+    if (state.currentView === 'dashboard') renderDashboard();
+  } catch (err) {
+    showToast('エラー: ' + err.message);
+  }
+  showLoading(false);
+}
+
+// ============================================================
+// 個別記録(取引ログ)の編集・削除
+// ============================================================
+
+function openEditLogItemModal(item, categoryKey, date) {
+  const cat = CATEGORIES.find(c => c.key === categoryKey);
+  state.editingLogItem = { item, categoryKey, date };
+  document.getElementById('modal-title').textContent = '記録を修正';
+  renderEditLogItemForm(item, cat, date);
+  openModal();
+}
+
+function renderEditLogItemForm(item, cat, date) {
+  const body = document.getElementById('modal-body');
+  const isCard = item.paymentMethod === 'カード';
+
+  body.innerHTML = `
+    <div class="card mb-0" style="margin-bottom:16px;background:#F7F8FC">
+      <div style="font-size:13px;color:var(--text-sub)">${formatDate(date)}　${item.time || ''}</div>
+      <div style="font-size:17px;font-weight:700;margin-top:4px">${cat.key}</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">${item.paymentMethod}の金額</label>
+      <input type="number" class="form-control" id="log-edit-amount" value="${item.amount || ''}" placeholder="0" inputmode="numeric">
+    </div>
+    ${isCard ? `
+    <div class="form-group">
+      <label class="form-label">カードの種類</label>
+      <select class="form-control" id="log-edit-cardtype">
+        <option value="">なし</option>
+        ${CARD_TYPES.map(t => `<option value="${t}" ${item.cardType === t ? 'selected' : ''}>${t}</option>`).join('')}
+      </select>
+    </div>` : ''}
+    ${cat.hasMemo ? `
+    <div class="form-group">
+      <label class="form-label">メモ</label>
+      <input type="text" class="form-control" id="log-edit-memo" value="${escapeHtml(item.memo || '')}" placeholder="内容">
+    </div>` : ''}
+    <button class="btn btn-primary" onclick="submitEditLogItem()">更新する</button>
+    <button class="btn btn-danger" onclick="deleteLogItemUI()" style="margin-top:10px">この記録を削除</button>
+  `;
+}
+
+async function submitEditLogItem() {
+  const { item } = state.editingLogItem;
+  const amount = parseInt(document.getElementById('log-edit-amount').value) || 0;
+  const cardType = item.paymentMethod === 'カード'
+    ? (document.getElementById('log-edit-cardtype')?.value || '')
+    : item.cardType;
+  const memo = document.getElementById('log-edit-memo')?.value || '';
+
+  showLoading(true);
+  try {
+    await gasCall({ action: 'updateLogItem', id: item.id, amount, cardType, memo });
+    state.allMonths = null;
+    await loadCurrentMonth(state.currentSheet);
+    closeModal();
+    showToast('更新しました ✓');
+    renderHistory();
+    if (state.currentView === 'dashboard') renderDashboard();
+  } catch (err) {
+    showToast('更新エラー: ' + err.message);
+  }
+  showLoading(false);
+}
+
+async function deleteLogItemUI() {
+  if (!confirm('この記録を削除しますか？')) return;
+  const { item } = state.editingLogItem;
+
+  showLoading(true);
+  try {
+    await gasCall({ action: 'deleteLogItem', id: item.id });
+    state.allMonths = null;
+    await loadCurrentMonth(state.currentSheet);
+    closeModal();
+    showToast('削除しました');
     renderHistory();
     if (state.currentView === 'dashboard') renderDashboard();
   } catch (err) {
