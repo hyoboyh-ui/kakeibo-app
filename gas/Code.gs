@@ -8,12 +8,25 @@
 const SPREADSHEET_ID = '';
 
 function getSS() {
+  if (_ssCache) return _ssCache;
   const active = SpreadsheetApp.getActive();
-  if (active) return active;
+  if (active) {
+    _ssCache = active;
+    return _ssCache;
+  }
   if (!SPREADSHEET_ID) {
     throw new Error('スプレッドシートに紐づいていません。Code.gs の SPREADSHEET_ID を設定してください。');
   }
-  return SpreadsheetApp.openById(SPREADSHEET_ID);
+  _ssCache = SpreadsheetApp.openById(SPREADSHEET_ID);
+  return _ssCache;
+}
+
+// シート取得も1リクエスト内では使い回す（getSheetByNameも毎回API往復になるため）
+function getSheetCached(name) {
+  if (Object.prototype.hasOwnProperty.call(_sheetCache, name)) return _sheetCache[name];
+  const ws = getSS().getSheetByName(name);
+  _sheetCache[name] = ws;
+  return ws;
 }
 
 // 列定義
@@ -76,37 +89,113 @@ const TOTAL_COLS = 42;
 // エントリポイント
 // ============================================================
 
+const WRITE_ACTIONS = ['saveEntry', 'updateEntry', 'updateBudget', 'updateLogItem', 'deleteLogItem', 'updateResidual', 'syncEntries'];
+
+const API_SECRET_PROP = 'API_SECRET';
+
+// ============================================================
+// 初回セットアップ（Apps Scriptエディタから手動で1回だけ実行する）
+//
+// 実行すると合言葉(シークレット)を生成してログに出力する。
+// 出力された文字列を js/app.js の API_SECRET に貼り付けること。
+// ※これを実行するまで、このWebアプリは全リクエストを拒否する（安全側に倒すため）
+// ============================================================
+function setupApiSecret() {
+  const secret = Utilities.getUuid() + Utilities.getUuid().replace(/-/g, '');
+  PropertiesService.getScriptProperties().setProperty(API_SECRET_PROP, secret);
+  Logger.log('生成された API_SECRET:\n' + secret + '\n\nこの文字列を js/app.js の API_SECRET に貼り付けてください。');
+  return secret;
+}
+
+// タイミング攻撃を避けるため、長さと全文字を必ず最後まで比較する
+function secretMatches(given, expected) {
+  if (typeof given !== 'string' || typeof expected !== 'string') return false;
+  if (given.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < given.length; i++) {
+    diff |= given.charCodeAt(i) ^ expected.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+function jsonOutput(obj) {
+  return ContentService
+    .createTextOutput(typeof obj === 'string' ? obj : JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
 function doPost(e) {
-  const headers = { 'Access-Control-Allow-Origin': '*' };
   try {
+    resetRequestCaches();
     const data = JSON.parse(e.postData.contents);
     const action = data.action;
-    let result;
 
-    switch (action) {
-      case 'getMonthData':    result = getMonthData(data.sheetName);   break;
-      case 'saveEntry':       result = saveEntry(data);                 break;
-      case 'updateEntry':     result = updateEntry(data);               break;
-      case 'getBudget':       result = getBudget(data.sheetName);       break;
-      case 'updateBudget':    result = updateBudget(data);              break;
-      case 'getAllMonths':     result = getAllMonthsData();              break;
-      case 'checkNewSheet':   result = checkAndCreateNewSheet();        break;
-      case 'updateLogItem':   result = updateLogItem(data);             break;
-      case 'deleteLogItem':   result = deleteLogItem(data);             break;
-      default: result = { error: 'Unknown action' };
+    // --- 認証 ---------------------------------------------------------
+    // このWebアプリは「全員（匿名を含む）」で公開する必要があるため、
+    // URLさえ知っていれば誰でも家計データを読み書きできてしまう。
+    // それを防ぐため、リクエスト本文の合言葉をスクリプトプロパティと照合する。
+    const expected = PropertiesService.getScriptProperties().getProperty(API_SECRET_PROP);
+    if (!expected) {
+      return jsonOutput({ error: 'サーバー未設定です（Apps Scriptで setupApiSecret を1回実行してください）' });
     }
-    return ContentService
-      .createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
+    if (!secretMatches(data.secret, expected)) {
+      return jsonOutput({ error: '認証に失敗しました' });
+    }
+
+    // --- 書き込みは直列化 ----------------------------------------------
+    // saveEntry等は「セルを読む→加算して書く」構造のため、2人が同時に記録すると
+    // 後勝ちで片方の金額が丸ごと消える。書き込み系は必ずロックを取ってから実行する。
+    const isWrite = WRITE_ACTIONS.includes(action);
+    if (!isWrite) return jsonOutput(routeAction(action, data));
+
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(25000)) {
+      return jsonOutput({ error: '混み合っています。少し待ってからもう一度お試しください' });
+    }
+    try {
+      // 重複実行の防止（フロント側のリトライで実際は成功していた処理を
+      // 二重実行し、金額が二重加算されるのを防ぐ）。ロック取得後に判定するため、
+      // 「1回目がまだ実行中に再送が来る」ケースもここで確実に検知できる。
+      const cache = CacheService.getScriptCache();
+      const dedupeKey = data.requestId ? 'req_' + data.requestId : null;
+      if (dedupeKey) {
+        const cached = cache.get(dedupeKey);
+        if (cached) return jsonOutput(cached);
+      }
+
+      const output = JSON.stringify(routeAction(action, data));
+      if (dedupeKey) cache.put(dedupeKey, output, 300); // 5分間だけ再送を検知
+      return jsonOutput(output);
+    } finally {
+      lock.releaseLock();
+    }
   } catch (err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ error: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return jsonOutput({ error: err.message });
   }
 }
 
-function doGet(e) {
-  return doPost({ postData: { contents: JSON.stringify(e.parameter) } });
+function routeAction(action, data) {
+  switch (action) {
+    case 'getMonthData':    return getMonthData(data.sheetName);
+    case 'saveEntry':       return saveEntry(data);
+    case 'updateEntry':     return updateEntry(data);
+    case 'getBudget':       return getBudget(data.sheetName);
+    case 'updateBudget':    return updateBudget(data);
+    case 'getAllMonths':    return getAllMonthsData();
+    case 'checkNewSheet':   return checkAndCreateNewSheet();
+    case 'updateLogItem':   return updateLogItem(data);
+    case 'deleteLogItem':   return deleteLogItem(data);
+    case 'updateResidual':  return updateResidual(data);
+    case 'syncEntries':     return syncEntries(data);
+    default: return { error: 'Unknown action' };
+  }
+}
+
+// GETは一切受け付けない。
+// 以前はdoPostへそのまま流していたため、URLを開くだけ（あるいは外部サイトの
+// <img src="...">を踏むだけ）でデータを書き換えられる状態だった。
+function doGet() {
+  return jsonOutput({ error: 'GETは利用できません' });
 }
 
 // ============================================================
@@ -220,28 +309,195 @@ function getLogSheet() {
     ws.setFrozenRows(1);
     ws.hideSheet();
   }
+  // sheetName・date列は"2026年08月"や"2026/08/21"のような日付に見える文字列のため、
+  // 書式が既定(自動)のままだとSheetsが自動的にDate型へ変換してしまい、
+  // 文字列としての一致比較(getLogRows)が壊れる。
+  // 列そのものに書式を掛けておけば、以後どれだけ行が増えても効くので、1回だけ実行する。
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('LOG_COLS_FORMATTED') !== '1') {
+    ws.getRange('B:C').setNumberFormat('@');
+    props.setProperty('LOG_COLS_FORMATTED', '1');
+  }
   return ws;
 }
 
-function appendLogItem({ sheetName, date, category, paymentMethod, cardType, amount, memo }) {
+function buildLogRow({ id, sheetName, date, category, paymentMethod, cardType, amount, memo }) {
+  return [id || Utilities.getUuid(), sheetName, date, category, paymentMethod,
+          cardType || '', amount, memo || '', new Date(), false];
+}
+
+// 複数行をまとめて1回で書き込む（1件ずつ書くと件数分だけ通信が発生するため）
+function appendLogRows(rows) {
+  if (rows.length === 0) return;
   const ws = getLogSheet();
-  const id = Utilities.getUuid();
-  ws.appendRow([id, sheetName, date, category, paymentMethod, cardType || '', amount, memo || '', new Date(), false]);
-  return id;
+  // 列全体に文字列書式を掛けてあるので、行ごとの書式設定は不要
+  const startRow = readLogValues().values.length + 2;
+  ws.getRange(startRow, 1, rows.length, LOG_HEADERS.length).setValues(rows);
+  if (_logValuesCache) rows.forEach(r => _logValuesCache.values.push(r)); // 読み込み済みの一覧にも足しておく
+}
+
+function appendLogItem(item) {
+  const row = buildLogRow(item);
+  appendLogRows([row]);
+  return row[0];
+}
+
+// 文字列であるべき列がすでにDate型で保存されてしまっている過去データを、元の文字列表現に戻す
+function normalizeLogDateValue(v, pattern) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Tokyo', pattern);
+  return v;
+}
+
+// ============================================================
+// 残高ベース（ログ導入前からある「内訳の分からない金額」の記録）
+//
+// 集計セルの値は「残高ベース + 有効なログの合計」で必ず再計算する。
+// 加算/減算を積み重ねる方式をやめることで、二重加算・取りこぼし・
+// ログと集計セルの食い違いが構造的に起こらなくなる。
+// ============================================================
+
+const RESIDUAL_SHEET_NAME = '残高ベース';
+const RESIDUAL_HEADERS = ['sheetName', 'date', 'category', 'cash', 'card', 'cardType', 'memo'];
+
+function getResidualSheet() {
+  const ss = getSS();
+  let ws = ss.getSheetByName(RESIDUAL_SHEET_NAME);
+  if (!ws) {
+    ws = ss.insertSheet(RESIDUAL_SHEET_NAME);
+    ws.getRange(1, 1, 1, RESIDUAL_HEADERS.length).setValues([RESIDUAL_HEADERS]);
+    ws.setFrozenRows(1);
+    ws.hideSheet();
+    // 取引ログと同じ理由（日付に見える文字列の自動変換対策）で文字列書式に固定
+    ws.getRange(2, 1, Math.max(ws.getMaxRows() - 1, 1), 3).setNumberFormat('@');
+  }
+  return ws;
+}
+
+// 1リクエスト中に同じシートを何度も読み直さないためのキャッシュ
+// （doPostの入口で必ず破棄するので、リクエストをまたいで古い値が残ることはない）
+let _residualCache = null;
+let _logValuesCache = null;
+let _ssCache = null;
+let _sheetCache = {};
+let _dateRowCache = {};
+
+function resetRequestCaches() {
+  _residualCache = null;
+  _logValuesCache = null;
+  _ssCache = null;
+  _sheetCache = {};
+  _dateRowCache = {};
+}
+
+function readResidualRows() {
+  if (_residualCache) return _residualCache;
+  const ws = getResidualSheet();
+  const lastRow = ws.getLastRow();
+  if (lastRow < 2) {
+    _residualCache = { ws, rows: [] };
+    return _residualCache;
+  }
+  const values = ws.getRange(2, 1, lastRow - 1, RESIDUAL_HEADERS.length).getValues();
+  const rows = values.map((r, i) => ({
+    rowIndex: i + 2,
+    sheetName: normalizeLogDateValue(r[0], 'yyyy年MM月'),
+    date: normalizeLogDateValue(r[1], 'yyyy/MM/dd'),
+    category: r[2],
+    cash: typeof r[3] === 'number' ? r[3] : 0,
+    card: typeof r[4] === 'number' ? r[4] : 0,
+    cardType: r[5] || '',
+    memo: r[6] || ''
+  }));
+  _residualCache = { ws, rows };
+  return _residualCache;
+}
+
+function findResidual(sheetName, date, category) {
+  const { ws, rows } = readResidualRows();
+  const found = rows.find(r => r.sheetName === sheetName && r.date === date && r.category === category);
+  return { ws, found };
+}
+
+function writeResidual(sheetName, date, category, values) {
+  const { ws, found } = findResidual(sheetName, date, category);
+  const row = [sheetName, date, category, values.cash || 0, values.card || 0, values.cardType || '', values.memo || ''];
+  const rowIndex = found ? found.rowIndex : ws.getLastRow() + 1;
+  if (!found) ws.getRange(rowIndex, 1, 1, 3).setNumberFormat('@');
+  ws.getRange(rowIndex, 1, 1, RESIDUAL_HEADERS.length).setValues([row]);
+  _residualCache = null; // 書き換えたので読み直させる
+}
+
+// その日・その分類にログが1件も無い状態で初めて触るとき、
+// 既存の集計セルの値を「内訳不明の記録」として退避しておく。
+// これをしないと、ログ導入前の金額が再計算で消えてしまう。
+function ensureResidual(monthWs, sheetName, date, category, cat, targetRow) {
+  const { found } = findResidual(sheetName, date, category);
+  if (found) return;
+  const trio = monthWs.getRange(targetRow, cat.cashCol, 1, 3).getValues()[0];
+  const memo = cat.memoCol ? (monthWs.getRange(targetRow, cat.memoCol).getValue() || '') : '';
+  writeResidual(sheetName, date, category, {
+    cash: typeof trio[0] === 'number' ? trio[0] : 0,
+    card: typeof trio[1] === 'number' ? trio[1] : 0,
+    cardType: trio[2] || '',
+    memo: memo
+  });
+}
+
+// 集計セルを「残高ベース + 有効なログ」から再計算して書き戻す（唯一の書き込み口）
+function recalcCell(monthWs, sheetName, date, category, knownRow) {
+  const cat = CATEGORIES.find(c => c.key === category);
+  if (!cat) return null;
+  const targetRow = knownRow || findDateRow(monthWs, date);
+  if (targetRow === -1) return null;
+
+  const { found } = findResidual(sheetName, date, category);
+  const base = found || { cash: 0, card: 0, cardType: '', memo: '' };
+
+  const items = getLogRows(sheetName).filter(r => r.date === date && r.category === category);
+
+  let cash = base.cash;
+  let card = base.card;
+  const cardTypes = base.cardType ? [base.cardType] : [];
+  const memos = base.memo ? [base.memo] : [];
+  items.forEach(it => {
+    if (it.paymentMethod === '現金') cash += it.amount;
+    else {
+      card += it.amount;
+      if (it.cardType && cardTypes.indexOf(it.cardType) === -1) cardTypes.push(it.cardType);
+    }
+    if (it.memo) memos.push(it.memo);
+  });
+
+  const cardTypeText = cardTypes.join(', ');
+  const memoText = memos.join(' / ');
+  monthWs.getRange(targetRow, cat.cashCol, 1, 3).setValues([[cash, card, cardTypeText]]);
+  if (cat.memoCol) monthWs.getRange(targetRow, cat.memoCol).setValue(memoText);
+
+  invalidateMonthsCache();
+  return { date, category, 現金: cash, カード: card, カード種類: cardTypeText, メモ: memoText };
+}
+
+// ログシート本体の読み出し（1リクエスト内では1回だけ実際に読む）
+function readLogValues() {
+  if (_logValuesCache) return _logValuesCache;
+  const ws = getLogSheet();
+  const lastRow = ws.getLastRow();
+  const values = lastRow < 2 ? [] : ws.getRange(2, 1, lastRow - 1, LOG_HEADERS.length).getValues();
+  _logValuesCache = { ws, values };
+  return _logValuesCache;
 }
 
 // sheetName(月シート名)に属する、削除されていないログ行だけを取得
 function getLogRows(sheetName) {
-  const ws = getLogSheet();
-  const lastRow = ws.getLastRow();
-  if (lastRow < 2) return [];
-  const values = ws.getRange(2, 1, lastRow - 1, LOG_HEADERS.length).getValues();
+  const { values } = readLogValues();
   const rows = [];
   values.forEach((row, i) => {
-    if (row[1] !== sheetName || row[9] === true) return;
+    const rowSheetName = normalizeLogDateValue(row[1], 'yyyy年MM月');
+    const rowDate = normalizeLogDateValue(row[2], 'yyyy/MM/dd');
+    if (rowSheetName !== sheetName || row[9] === true) return;
     rows.push({
       rowIndex: i + 2,
-      id: row[0], sheetName: row[1], date: row[2], category: row[3],
+      id: row[0], sheetName: rowSheetName, date: rowDate, category: row[3],
       paymentMethod: row[4], cardType: row[5] || '', amount: row[6] || 0,
       memo: row[7] || '', recordedAt: row[8]
     });
@@ -250,12 +506,9 @@ function getLogRows(sheetName) {
 }
 
 function findLogRowById(id) {
-  const ws = getLogSheet();
-  const lastRow = ws.getLastRow();
-  if (lastRow < 2) return null;
-  const ids = ws.getRange(2, 1, lastRow - 1, 1).getValues();
-  for (let i = 0; i < ids.length; i++) {
-    if (ids[i][0] === id) return { ws, rowIndex: i + 2 };
+  const { ws, values } = readLogValues();
+  for (let i = 0; i < values.length; i++) {
+    if (values[i][0] === id) return { ws, rowIndex: i + 2, row: values[i] };
   }
   return null;
 }
@@ -264,63 +517,131 @@ function updateLogItem(data) {
   const { id, amount, cardType, memo } = data;
   const found = findLogRowById(id);
   if (!found) return { error: '記録が見つかりません' };
-  const { ws, rowIndex } = found;
-  const row = ws.getRange(rowIndex, 1, 1, LOG_HEADERS.length).getValues()[0];
-  const [, sheetName, date, category, paymentMethod, oldCardType, oldAmount] = row;
+  const { ws, rowIndex, row } = found;
+  const [, rawSheetName, rawDate, category] = row;
+  const sheetName = normalizeLogDateValue(rawSheetName, 'yyyy年MM月');
+  const date = normalizeLogDateValue(rawDate, 'yyyy/MM/dd');
 
-  const monthWs = getSS().getSheetByName(sheetName);
+  const monthWs = getSheetCached(sheetName);
   if (!monthWs) return { error: '月シートが見つかりません' };
-  const cat = CATEGORIES.find(c => c.key === category);
-  if (!cat) return { error: `カテゴリが見つかりません: ${category}` };
 
-  const targetRow = findDateRow(monthWs, date);
-  if (targetRow === -1) return { error: `日付が見つかりません: ${date}` };
+  // ログ行を更新してから、集計セルを丸ごと再計算する（差分加算はしない）
+  ws.getRange(rowIndex, 6, 1, 3).setValues([[cardType || '', amount || 0, memo || '']]);
+  row[5] = cardType || ''; row[6] = amount || 0; row[7] = memo || ''; // 読み込み済みの値も更新
 
-  const colIdx = paymentMethod === '現金' ? cat.cashCol : cat.cardCol;
-  const delta = (amount || 0) - (oldAmount || 0);
-  const cellValue = monthWs.getRange(targetRow, colIdx).getValue() || 0;
-  monthWs.getRange(targetRow, colIdx).setValue((typeof cellValue === 'number' ? cellValue : 0) + delta);
-
-  if (paymentMethod === 'カード' && cardType !== undefined && cardType !== oldCardType) {
-    monthWs.getRange(targetRow, cat.cardTypeCol).setValue(cardType || '');
-  }
-
-  ws.getRange(rowIndex, 7).setValue(amount || 0);
-  ws.getRange(rowIndex, 6).setValue(cardType || '');
-  ws.getRange(rowIndex, 8).setValue(memo || '');
-
-  invalidateMonthsCache();
-  return { success: true };
+  const updated = recalcCell(monthWs, sheetName, date, category);
+  if (!updated) return { error: `再計算に失敗しました: ${date} / ${category}` };
+  return { success: true, updated };
 }
 
 function deleteLogItem(data) {
   const { id } = data;
   const found = findLogRowById(id);
   if (!found) return { error: '記録が見つかりません' };
-  const { ws, rowIndex } = found;
-  const row = ws.getRange(rowIndex, 1, 1, LOG_HEADERS.length).getValues()[0];
-  const [, sheetName, date, category, paymentMethod, , amount] = row;
-
-  const monthWs = getSS().getSheetByName(sheetName);
-  const cat = CATEGORIES.find(c => c.key === category);
-  if (monthWs && cat) {
-    const targetRow = findDateRow(monthWs, date);
-    if (targetRow !== -1) {
-      const colIdx = paymentMethod === '現金' ? cat.cashCol : cat.cardCol;
-      const cellValue = monthWs.getRange(targetRow, colIdx).getValue() || 0;
-      monthWs.getRange(targetRow, colIdx).setValue(Math.max(0, (typeof cellValue === 'number' ? cellValue : 0) - (amount || 0)));
-    }
-  }
+  const { ws, rowIndex, row } = found;
+  const [, rawSheetName, rawDate, category] = row;
+  const sheetName = normalizeLogDateValue(rawSheetName, 'yyyy年MM月');
+  const date = normalizeLogDateValue(rawDate, 'yyyy/MM/dd');
 
   ws.getRange(rowIndex, 10).setValue(true);
-  invalidateMonthsCache();
-  return { success: true };
+  row[9] = true; // 読み込み済みの値も更新
+
+  const monthWs = getSheetCached(sheetName);
+  if (!monthWs) return { error: '月シートが見つかりません' };
+
+  const updated = recalcCell(monthWs, sheetName, date, category);
+  if (!updated) return { error: `再計算に失敗しました: ${date} / ${category}` };
+  return { success: true, updated };
+}
+
+// 端末に貯めた未同期の記録をまとめて反映する。
+// 1件ずつsaveEntryを呼ぶのに比べ、通信もロックも1回で済む。
+// 各記録のidは端末側で採番したものをそのまま使うため、同じものを二重に
+// 送ってしまっても既存idとして弾かれ、金額が重複することはない。
+function syncEntries(data) {
+  const entries = data.entries || [];
+  if (entries.length === 0) return { success: true, results: [] };
+
+  const existingIds = {};
+  readLogValues().values.forEach(r => { existingIds[r[0]] = true; });
+
+  const results = [];
+  const newRows = [];
+  const affected = {};
+
+  entries.forEach(en => {
+    const name = en.sheetName || getCurrentSheetName();
+    let ws = getSheetCached(name);
+    if (!ws) ws = createSheet(name);
+
+    const cat = CATEGORIES.find(c => c.key === en.category);
+    if (!cat) { results.push({ id: en.id, error: `カテゴリが見つかりません: ${en.category}` }); return; }
+
+    const targetRow = findDateRow(ws, en.date);
+    if (targetRow === -1) { results.push({ id: en.id, error: `日付が見つかりません: ${en.date}` }); return; }
+
+    if (existingIds[en.id]) { results.push({ id: en.id, success: true, duplicate: true }); return; }
+
+    ensureResidual(ws, name, en.date, en.category, cat, targetRow);
+    newRows.push(buildLogRow({
+      id: en.id, sheetName: name, date: en.date, category: en.category,
+      paymentMethod: en.paymentMethod, cardType: en.cardType, amount: en.amount, memo: en.memo
+    }));
+    existingIds[en.id] = true;
+    affected[name + '|' + en.date + '|' + en.category] = { name, date: en.date, category: en.category, row: targetRow };
+    results.push({ id: en.id, success: true });
+  });
+
+  appendLogRows(newRows);
+
+  // 影響のあった日・カテゴリだけ、最後に1回ずつ再計算する
+  const updated = [];
+  Object.keys(affected).forEach(k => {
+    const a = affected[k];
+    const u = recalcCell(getSheetCached(a.name), a.name, a.date, a.category, a.row);
+    if (u) updated.push(u);
+  });
+
+  return { success: true, results, updated };
+}
+
+// 「それ以前の記録」(内訳の分からない過去分)だけを直接編集する。
+// ログ明細には触れないので、同じ日の個別記録は保持される。
+function updateResidual(data) {
+  const { sheetName, date, category, cash, card } = data;
+  const name = sheetName || getCurrentSheetName();
+  const monthWs = getSheetCached(name);
+  if (!monthWs) return { error: 'シートが見つかりません' };
+  const cat = CATEGORIES.find(c => c.key === category);
+  if (!cat) return { error: `カテゴリが見つかりません: ${category}` };
+  const targetRow = findDateRow(monthWs, date);
+  if (targetRow === -1) return { error: `日付が見つかりません: ${date}` };
+
+  // 既存の残高ベースがあればカード種類/メモを引き継ぐ
+  const { found } = findResidual(name, date, category);
+  writeResidual(name, date, category, {
+    cash: cash || 0,
+    card: card || 0,
+    cardType: found ? found.cardType : '',
+    memo: found ? found.memo : ''
+  });
+
+  const updated = recalcCell(monthWs, name, date, category);
+  if (!updated) return { error: `再計算に失敗しました: ${date} / ${category}` };
+  return { success: true, updated };
 }
 
 // 月シート内で指定日付に対応する行番号を探す（見つからなければ-1）
+// 日付列は1リクエスト中に何度も引くので、読んだ内容を使い回す
 function findDateRow(ws, date) {
-  const lastRow = ws.getLastRow();
-  const dateCol = ws.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW, 1).getValues();
+  const key = ws.getName();
+  let dateCol = _dateRowCache[key];
+  if (!dateCol) {
+    const lastRow = ws.getLastRow();
+    if (lastRow <= DATA_START_ROW) return -1;
+    dateCol = ws.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW, 1).getValues();
+    _dateRowCache[key] = dateCol;
+  }
   for (let i = 0; i < dateCol.length; i++) {
     const cellDate = dateCol[i][0];
     const cellStr = cellDate instanceof Date
@@ -456,8 +777,7 @@ function getAllMonthsData() {
 function saveEntry(data) {
   const { sheetName, date, category, paymentMethod, cardType, amount, memo } = data;
   const name = sheetName || getCurrentSheetName();
-  const ss = getSS();
-  let ws = ss.getSheetByName(name);
+  let ws = getSheetCached(name);
   if (!ws) ws = createSheet(name);
 
   const cat = CATEGORIES.find(c => c.key === category);
@@ -466,22 +786,28 @@ function saveEntry(data) {
   const targetRow = findDateRow(ws, date);
   if (targetRow === -1) return { error: `日付が見つかりません: ${date}` };
 
-  const colIdx = paymentMethod === '現金' ? cat.cashCol : cat.cardCol;
-  const existing = ws.getRange(targetRow, colIdx).getValue() || 0;
-  ws.getRange(targetRow, colIdx).setValue((typeof existing === 'number' ? existing : 0) + amount);
+  // ログを積む前に、内訳の分からない既存分を残高ベースへ退避しておく
+  ensureResidual(ws, name, date, category, cat, targetRow);
 
-  if (paymentMethod === 'カード') {
-    ws.getRange(targetRow, cat.cardTypeCol).setValue(cardType || '');
-  }
-  if (cat.memoCol && memo) {
-    const existingMemo = ws.getRange(targetRow, cat.memoCol).getValue() || '';
-    ws.getRange(targetRow, cat.memoCol).setValue(existingMemo ? existingMemo + ' / ' + memo : memo);
-  }
+  const id = appendLogItem({ sheetName: name, date, category, paymentMethod, cardType, amount, memo });
 
-  appendLogItem({ sheetName: name, date, category, paymentMethod, cardType, amount, memo });
+  // 集計セルは「残高ベース + 有効なログ」から必ず再計算する（行番号は判明済み）
+  const updated = recalcCell(ws, name, date, category, targetRow);
+  if (!updated) return { error: `再計算に失敗しました: ${date} / ${category}` };
 
-  invalidateMonthsCache();
-  return { success: true };
+  // フロント側が再取得せずに画面を更新できるよう、確定後の値を返す
+  return {
+    success: true,
+    item: {
+      id,
+      paymentMethod,
+      cardType: cardType || '',
+      amount,
+      memo: memo || '',
+      time: Utilities.formatDate(new Date(), 'Asia/Tokyo', 'HH:mm')
+    },
+    updated
+  };
 }
 
 function updateEntry(data) {
@@ -494,13 +820,39 @@ function updateEntry(data) {
   const cat = CATEGORIES.find(c => c.key === category);
   if (!cat) return { error: `カテゴリが見つかりません: ${category}` };
 
-  ws.getRange(rowIndex, cat.cashCol).setValue(cashAmount || 0);
-  ws.getRange(rowIndex, cat.cardCol).setValue(cardAmount || 0);
-  ws.getRange(rowIndex, cat.cardTypeCol).setValue(cardType || '');
-  if (cat.memoCol) ws.getRange(rowIndex, cat.memoCol).setValue(memo || '');
+  // 集計セルを直接編集する操作は「その日・その分類の内容をこの値で確定させる」意味とする。
+  // 個別のログ明細を残したままにすると、集計セルとログの合計が食い違ってしまうため、
+  // 該当するログをすべて無効化し、指定された値を残高ベースとして書き込んでから再計算する。
+  const rawDate = ws.getRange(rowIndex, 1).getValue();
+  const date = rawDate instanceof Date
+    ? Utilities.formatDate(rawDate, 'Asia/Tokyo', 'yyyy/MM/dd')
+    : String(rawDate);
 
-  invalidateMonthsCache();
-  return { success: true };
+  invalidateLogsFor(name, date, category);
+  writeResidual(name, date, category, {
+    cash: cashAmount || 0,
+    card: cardAmount || 0,
+    cardType: cardType || '',
+    memo: memo || ''
+  });
+
+  const updated = recalcCell(ws, name, date, category);
+  if (!updated) return { error: `再計算に失敗しました: ${date} / ${category}` };
+  return { success: true, updated };
+}
+
+// 指定した日・分類のログ行をすべて無効化する（論理削除）
+function invalidateLogsFor(sheetName, date, category) {
+  const { ws, values } = readLogValues();
+  if (values.length === 0) return;
+  const flags = values.map(row => {
+    const rowSheetName = normalizeLogDateValue(row[1], 'yyyy年MM月');
+    const rowDate = normalizeLogDateValue(row[2], 'yyyy/MM/dd');
+    const match = rowSheetName === sheetName && rowDate === date && row[3] === category;
+    if (match) row[9] = true; // 読み込み済みの値も更新
+    return [row[9]];
+  });
+  ws.getRange(2, 10, flags.length, 1).setValues(flags);
 }
 
 function updateBudget(data) {

@@ -2,7 +2,8 @@
 // 木村家 家計簿アプリ
 // ============================================================
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbylz_Wl5dAR6hHz0DxIE-gWpAWxGbkzQZKNtkCQ41w_5gdqPZvyTcJ0TAexsTsQ1x0x/exec'; // デプロイ後に置き換え
+// GAS_URL と API_SECRET は js/config.js で定義している。
+// （合言葉を公開リポジトリに載せないため、接続設定だけ別ファイルに分離）
 
 const CATEGORIES = [
   { key: '食費',             hasMemo: true, color: 'cat-sky'   },
@@ -30,6 +31,7 @@ const state = {
   selectedDate: null,
   editingEntry: null,
   editingLogItem: null,
+  editingResidual: null,
   chartData: null,
   summaryData: null,
   allMonths: null,
@@ -101,6 +103,93 @@ async function handleLogin(e) {
 
 const MONTH_CACHE_KEY = 'kakeibo_cache_monthData';
 
+// ============================================================
+// 未同期の記録（端末内キュー）
+//
+// 入力はまずこのキューに入れ、同期ボタンを押したときにまとめて送る。
+// localStorageなのでアプリや端末を再起動しても消えない。
+// ============================================================
+
+const PENDING_KEY = 'kakeibo_pending';
+const LAST_SYNC_KEY = 'kakeibo_last_sync';
+const SYNC_WARN_DAYS = 5;
+
+function getPending() {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function setPending(list) {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(list));
+  } catch (err) {
+    showToast('端末の保存領域がいっぱいです。同期してください');
+  }
+  updateSyncUI();
+}
+
+function addPending(item) {
+  const list = getPending();
+  list.push(item);
+  setPending(list);
+}
+
+function removePending(ids) {
+  const drop = {};
+  ids.forEach(id => { drop[id] = true; });
+  setPending(getPending().filter(p => !drop[p.id]));
+}
+
+function getLastSyncAt() {
+  const v = localStorage.getItem(LAST_SYNC_KEY);
+  return v ? parseInt(v, 10) : 0;
+}
+
+function daysSinceLastSync() {
+  const last = getLastSyncAt();
+  if (!last) return null;
+  return (Date.now() - last) / 86400000;
+}
+
+function newLocalId() {
+  return crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(16).slice(2));
+}
+
+// 保存済みデータに未同期分を重ねた「画面に出すべきデータ」を返す
+function viewData() {
+  const base = state.monthData;
+  if (!base) return null;
+  const pending = getPending().filter(p => p.sheetName === base.sheetName);
+  if (pending.length === 0) return base;
+
+  const merged = JSON.parse(JSON.stringify(base));
+  pending.forEach(p => {
+    const entry = merged.entries.find(e => normalizeDate(e.date) === normalizeDate(p.date));
+    if (!entry || !entry[p.category]) return;
+    const d = entry[p.category];
+    if (p.paymentMethod === '現金') {
+      d.現金 = (d.現金 || 0) + p.amount;
+    } else {
+      d.カード = (d.カード || 0) + p.amount;
+      if (p.cardType && !String(d.カード種類 || '').includes(p.cardType)) {
+        d.カード種類 = d.カード種類 ? d.カード種類 + ', ' + p.cardType : p.cardType;
+      }
+    }
+    if (!Array.isArray(d.items)) d.items = [];
+    d.items.push({
+      id: p.id, paymentMethod: p.paymentMethod, cardType: p.cardType || '',
+      amount: p.amount, memo: p.memo || '', time: p.time || '', pending: true
+    });
+    if (p.memo) d.メモ = d.メモ ? d.メモ + ' / ' + p.memo : p.memo;
+  });
+  return merged;
+}
+
 function readMonthCache() {
   try {
     const raw = localStorage.getItem(MONTH_CACHE_KEY);
@@ -139,11 +228,18 @@ async function showApp() {
     showLoading(true);
   }
 
+  updateSyncUI();
+
+  // 端末の保存領域を、空き容量不足時の自動削除から保護するよう要求しておく
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+
   // 2本のGAS通信を並列で実行
   await Promise.all([loadCurrentMonth(), loadAvailableMonths()]);
   updateAvailableSheets();
   showLoading(false);
   renderDashboard();
+
+  maybeWarnUnsynced();
 }
 
 // getAllMonths の結果はホーム・集計・グラフで共有する。
@@ -264,7 +360,7 @@ function renderDashboard() {
   const container = document.getElementById('budget-list');
   if (!state.monthData) return;
 
-  const { entries, budget } = state.monthData;
+  const { entries, budget } = viewData();
 
   // カテゴリ別合計を計算
   const totals = {};
@@ -331,7 +427,7 @@ function renderHistory() {
   const container = document.getElementById('history-list');
   if (!state.monthData) return;
 
-  const { entries } = state.monthData;
+  const { entries } = viewData();
   container.innerHTML = '';
 
   const { categories: catFilter, payments: paymentFilter, cardTypes: cardTypeFilter } = state.historyFilter;
@@ -409,6 +505,7 @@ function renderHistory() {
             <div class="entry-line" data-id="${it.id}">
               <span class="entry-line-time">${it.time || ''}</span>
               <span class="payment-badge ${badgeClass}"><img src="${icon}" class="payment-icon-small"> ${highlightMatch(label, search)}</span>
+              ${it.pending ? '<span class="entry-line-pending">未同期</span>' : ''}
               <span class="entry-line-amount">¥${fmt(it.amount)}</span>
             </div>
             ${it.memo ? `<div class="entry-line-memo">📝 ${highlightMatch(it.memo, search)}</div>` : ''}
@@ -419,13 +516,25 @@ function renderHistory() {
         card.innerHTML = `
           <div class="entry-multi-cat">${highlightMatch(cat.key, search)}</div>
           ${linesHtml}
-          ${showResidual ? `<div class="entry-residual-line"><span>それ以前の記録</span><span>¥${fmt(residualCash + residualCard)}</span></div>` : ''}
-          <div class="entry-total-row"><span>合計</span><span>¥${fmt(total)}</span></div>
+          ${showResidual ? `<div class="entry-residual-line" data-residual="1"><span>それ以前の記録</span><span>¥${fmt(residualCash + residualCard)} ›</span></div>` : ''}
+          <div class="entry-total-row"><span>${hasFilterOrSearch ? '絞り込み中の合計' : '合計'}</span><span>¥${fmt(total)}</span></div>
         `;
         card.querySelectorAll('.entry-line').forEach(lineEl => {
           const it = visibleItems.find(v => v.id === lineEl.dataset.id);
-          if (it) lineEl.addEventListener('click', () => openEditLogItemModal(it, cat.key, entry.date));
+          if (!it) return;
+          // 未同期の記録はまだサーバーに無いので、キューから取り消す操作だけ用意する
+          if (it.pending) {
+            lineEl.addEventListener('click', () => cancelPendingItem(it));
+          } else {
+            lineEl.addEventListener('click', () => openEditLogItemModal(it, cat.key, entry.date));
+          }
         });
+        const residualEl = card.querySelector('[data-residual]');
+        if (residualEl) {
+          residualEl.style.cursor = 'pointer';
+          residualEl.addEventListener('click', () =>
+            openEditResidualModal(cat.key, entry.date, residualCash, residualCard));
+        }
         group.appendChild(card);
         return;
       }
@@ -943,11 +1052,17 @@ function renderEntryForm() {
     </div>
   `;
 
+  // 表示中の月に今日が含まれない場合（過去月を見ているときや、締め日をまたぐ時期）は
+  // 今日を初期値にすると保存できないので、その月の初日を初期値にする
+  const initialDate = dates.some(d => d.str === todayStr)
+    ? todayStr
+    : (dates[0]?.str || todayStr);
+
   // 日付ストリップ
   const strip = document.getElementById('date-strip');
   dates.forEach(d => {
     const chip = document.createElement('div');
-    chip.className = 'date-chip' + (d.day === 6 ? ' sat' : d.day === 0 ? ' sun' : '') + (d.str === todayStr ? ' selected' : '');
+    chip.className = 'date-chip' + (d.day === 6 ? ' sat' : d.day === 0 ? ' sun' : '') + (d.str === initialDate ? ' selected' : '');
     chip.innerHTML = `<span class="chip-day">${d.dayJp}</span><span class="chip-date">${d.dd}</span>`;
     chip.addEventListener('click', () => {
       document.querySelectorAll('.date-chip').forEach(c => c.classList.remove('selected'));
@@ -956,9 +1071,9 @@ function renderEntryForm() {
     });
     strip.appendChild(chip);
   });
-  entryFormState.date = todayStr;
+  entryFormState.date = initialDate;
 
-  // スクロールして今日にフォーカス
+  // スクロールして選択中の日付にフォーカス
   setTimeout(() => {
     const sel = strip.querySelector('.selected');
     if (sel) sel.scrollIntoView({ inline: 'center', block: 'nearest' });
@@ -983,6 +1098,11 @@ function renderEditForm(entry, cat, d) {
   const cardAmt = d?.カード || 0;
   const cardType = d?.カード種類 || '';
   const memo = d?.メモ || '';
+  // 保存済みの種類が選択肢に無い場合（「その他」で自由入力した名前）は、
+  // 「その他」を選んだ状態にして、その名前を入力欄に復元する。
+  // これをしないと「なし」が選ばれてしまい、更新時にカード種類が消える。
+  const isOtherCard = !!cardType && !CARD_TYPES.includes(cardType);
+  const showOtherInput = isOtherCard || cardType === 'その他';
 
   body.innerHTML = `
     <div class="card mb-0" style="margin-bottom:16px;background:#F7F8FC">
@@ -1001,10 +1121,10 @@ function renderEditForm(entry, cat, d) {
       <label class="form-label">カードの種類</label>
       <select class="form-control" id="edit-card-type">
         <option value="">なし</option>
-        ${CARD_TYPES.map(t => `<option value="${t}" ${cardType === t ? 'selected' : ''}>${t}</option>`).join('')}
+        ${CARD_TYPES.map(t => `<option value="${t}" ${isOtherCard ? (t === 'その他' ? 'selected' : '') : (cardType === t ? 'selected' : '')}>${t}</option>`).join('')}
       </select>
-      <div id="edit-other-group" class="${cardType === 'その他' ? '' : 'hidden'} mt-4">
-        <input type="text" class="form-control" id="edit-other-input" value="${cardType === 'その他' ? '' : ''}" placeholder="カード名を入力">
+      <div id="edit-other-group" class="${showOtherInput ? '' : 'hidden'} mt-4">
+        <input type="text" class="form-control" id="edit-other-input" value="${isOtherCard ? escapeHtml(cardType) : ''}" placeholder="カード名を入力">
       </div>
     </div>
     ${cat.hasMemo ? `
@@ -1063,27 +1183,131 @@ async function submitEntry() {
     return;
   }
 
-  showLoading(true);
+  // 通信はせず端末内のキューに入れるだけなので、待ち時間なしで閉じられる
+  const now = new Date();
+  addPending({
+    id: newLocalId(),
+    sheetName: state.currentSheet,
+    date, category,
+    paymentMethod: payment,
+    cardType: resolvedCardType || '',
+    amount,
+    memo,
+    time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+    createdAt: now.getTime()
+  });
+
+  closeModal();
+  showToast('記録しました（未同期）');
+  if (state.currentView === 'dashboard') renderDashboard();
+  if (state.currentView === 'history')   renderHistory();
+}
+
+// 未同期の記録を取り消す（まだサーバーに送っていないので、消すだけでよい）
+function cancelPendingItem(item) {
+  if (!confirm(`この未同期の記録（¥${fmt(item.amount)}）を取り消しますか？`)) return;
+  removePending([item.id]);
+  showToast('取り消しました');
+  if (state.currentView === 'dashboard') renderDashboard();
+  if (state.currentView === 'history')   renderHistory();
+}
+
+// ============================================================
+// 同期
+// ============================================================
+
+let _syncing = false;
+
+async function syncNow(opts) {
+  const options = opts || {};
+  const pending = getPending();
+  if (pending.length === 0) {
+    if (!options.silent) showToast('同期するものはありません');
+    return { synced: 0 };
+  }
+  if (_syncing) return { synced: 0 };
+  _syncing = true;
+
+  if (!options.silent) showLoading(true);
   try {
-    await gasCall({
-      action: 'saveEntry',
-      sheetName: state.currentSheet,
-      date, category,
-      paymentMethod: payment,
-      cardType: resolvedCardType,
-      amount,
-      memo
-    });
+    const res = await gasCall({ action: 'syncEntries', entries: pending });
+    const results = res.results || [];
+    const okIds = results.filter(r => r.success).map(r => r.id);
+    const failed = results.filter(r => r.error);
+
+    if (okIds.length > 0) removePending(okIds);
+    localStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
+
     state.allMonths = null;
     await loadCurrentMonth(state.currentSheet);
-    closeModal();
-    showToast('記録しました ✓');
+    updateSyncUI();
     if (state.currentView === 'dashboard') renderDashboard();
     if (state.currentView === 'history')   renderHistory();
+
+    if (failed.length > 0) {
+      showToast(`${okIds.length}件を同期／${failed.length}件は失敗`);
+    } else if (!options.silent) {
+      showToast(`${okIds.length}件を同期しました ✓`);
+    }
+    return { synced: okIds.length, failed: failed.length };
   } catch (err) {
-    showToast('保存エラー: ' + err.message);
+    // 失敗してもキューはそのまま残るので、記録が消えることはない
+    if (!options.silent) showToast('同期エラー: ' + err.message);
+    return { synced: 0, error: err.message };
+  } finally {
+    _syncing = false;
+    if (!options.silent) showLoading(false);
   }
-  showLoading(false);
+}
+
+function updateSyncUI() {
+  const count = getPending().length;
+  const badge = document.getElementById('sync-badge');
+  if (badge) {
+    badge.classList.toggle('hidden', count === 0);
+    const label = document.getElementById('sync-badge-count');
+    if (label) label.textContent = String(count);
+  }
+}
+
+// 5日以上同期されていない状態で未同期がある場合、起動時に強く促す
+function maybeWarnUnsynced() {
+  const pending = getPending();
+  if (pending.length === 0) return;
+
+  const days = daysSinceLastSync();
+  const oldest = Math.min.apply(null, pending.map(p => p.createdAt || Date.now()));
+  const oldestDays = (Date.now() - oldest) / 86400000;
+  // 一度も同期していない場合は、最も古い未同期がいつからかで判断する
+  const elapsed = days === null ? oldestDays : Math.max(days, oldestDays);
+  if (elapsed < SYNC_WARN_DAYS) return;
+
+  showUnsyncedDialog(pending, elapsed);
+}
+
+function showUnsyncedDialog(pending, elapsed) {
+  const total = pending.reduce((s, p) => s + (p.amount || 0), 0);
+  const last = getLastSyncAt();
+  const lastText = last ? formatDateTimeShort(new Date(last)) : '一度もしていません';
+
+  document.getElementById('unsync-days').textContent = Math.floor(elapsed);
+  document.getElementById('unsync-count-lead').textContent = pending.length;
+  document.getElementById('unsync-last').textContent = lastText;
+  document.getElementById('unsync-total').textContent = `${pending.length}件 ・ ¥${fmt(total)}`;
+  document.getElementById('unsync-overlay').classList.add('show');
+}
+
+function closeUnsyncedDialog() {
+  document.getElementById('unsync-overlay').classList.remove('show');
+}
+
+async function syncFromDialog() {
+  closeUnsyncedDialog();
+  await syncNow();
+}
+
+function formatDateTimeShort(d) {
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 async function submitEdit() {
@@ -1157,6 +1381,9 @@ function openEditLogItemModal(item, categoryKey, date) {
 function renderEditLogItemForm(item, cat, date) {
   const body = document.getElementById('modal-body');
   const isCard = item.paymentMethod === 'カード';
+  // 選択肢に無い種類（「その他」で入力した名前）を「なし」扱いで消さないようにする
+  const isOtherCard = !!item.cardType && !CARD_TYPES.includes(item.cardType);
+  const showOtherInput = isOtherCard || item.cardType === 'その他';
 
   body.innerHTML = `
     <div class="card mb-0" style="margin-bottom:16px;background:#F7F8FC">
@@ -1172,8 +1399,11 @@ function renderEditLogItemForm(item, cat, date) {
       <label class="form-label">カードの種類</label>
       <select class="form-control" id="log-edit-cardtype">
         <option value="">なし</option>
-        ${CARD_TYPES.map(t => `<option value="${t}" ${item.cardType === t ? 'selected' : ''}>${t}</option>`).join('')}
+        ${CARD_TYPES.map(t => `<option value="${t}" ${isOtherCard ? (t === 'その他' ? 'selected' : '') : (item.cardType === t ? 'selected' : '')}>${t}</option>`).join('')}
       </select>
+      <div id="log-edit-other-group" class="${showOtherInput ? '' : 'hidden'} mt-4">
+        <input type="text" class="form-control" id="log-edit-other" value="${isOtherCard ? escapeHtml(item.cardType) : ''}" placeholder="カード名を入力">
+      </div>
     </div>` : ''}
     ${cat.hasMemo ? `
     <div class="form-group">
@@ -1183,14 +1413,22 @@ function renderEditLogItemForm(item, cat, date) {
     <button class="btn btn-primary" onclick="submitEditLogItem()">更新する</button>
     <button class="btn btn-danger" onclick="deleteLogItemUI()" style="margin-top:10px">この記録を削除</button>
   `;
+
+  document.getElementById('log-edit-cardtype')?.addEventListener('change', e => {
+    document.getElementById('log-edit-other-group').classList.toggle('hidden', e.target.value !== 'その他');
+  });
 }
 
 async function submitEditLogItem() {
   const { item } = state.editingLogItem;
   const amount = parseInt(document.getElementById('log-edit-amount').value) || 0;
-  const cardType = item.paymentMethod === 'カード'
-    ? (document.getElementById('log-edit-cardtype')?.value || '')
-    : item.cardType;
+  let cardType = item.cardType;
+  if (item.paymentMethod === 'カード') {
+    cardType = document.getElementById('log-edit-cardtype')?.value || '';
+    if (cardType === 'その他') {
+      cardType = document.getElementById('log-edit-other')?.value || 'その他';
+    }
+  }
   const memo = document.getElementById('log-edit-memo')?.value || '';
 
   showLoading(true);
@@ -1225,6 +1463,63 @@ async function deleteLogItemUI() {
     showToast('エラー: ' + err.message);
   }
   showLoading(false);
+}
+
+// 「それ以前の記録」(内訳の分からない過去分)の編集
+function openEditResidualModal(categoryKey, date, residualCash, residualCard) {
+  state.editingResidual = { categoryKey, date };
+  document.getElementById('modal-title').textContent = 'それ以前の記録を修正';
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="card mb-0" style="margin-bottom:16px;background:#F7F8FC">
+      <div style="font-size:13px;color:var(--text-sub)">${formatDate(date)}</div>
+      <div style="font-size:17px;font-weight:700;margin-top:4px">${escapeHtml(categoryKey)}</div>
+      <div style="font-size:12px;color:var(--text-sub);margin-top:6px">
+        個別の記録として残っていない分の金額です。ここを直しても、上に並んでいる個別の記録はそのまま残ります。
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">現金</label>
+      <input type="number" class="form-control" id="residual-cash" value="${residualCash || ''}" placeholder="0" inputmode="numeric">
+    </div>
+    <div class="form-group">
+      <label class="form-label">カード</label>
+      <input type="number" class="form-control" id="residual-card" value="${residualCard || ''}" placeholder="0" inputmode="numeric">
+    </div>
+    <button class="btn btn-primary" onclick="submitEditResidual()">更新する</button>
+    <button class="btn btn-danger" onclick="clearResidual()" style="margin-top:10px">この分を削除</button>
+  `;
+  openModal();
+}
+
+async function submitEditResidual(forceZero) {
+  const { categoryKey, date } = state.editingResidual;
+  const cash = forceZero ? 0 : (parseInt(document.getElementById('residual-cash').value) || 0);
+  const card = forceZero ? 0 : (parseInt(document.getElementById('residual-card').value) || 0);
+
+  showLoading(true);
+  try {
+    await gasCall({
+      action: 'updateResidual',
+      sheetName: state.currentSheet,
+      date, category: categoryKey,
+      cash, card
+    });
+    state.allMonths = null;
+    await loadCurrentMonth(state.currentSheet);
+    closeModal();
+    showToast(forceZero ? '削除しました' : '更新しました ✓');
+    renderHistory();
+    if (state.currentView === 'dashboard') renderDashboard();
+  } catch (err) {
+    showToast('エラー: ' + err.message);
+  }
+  showLoading(false);
+}
+
+async function clearResidual() {
+  if (!confirm('それ以前の記録を削除しますか？（個別の記録は残ります）')) return;
+  await submitEditResidual(true);
 }
 
 // ============================================================
@@ -1272,10 +1567,17 @@ function closeModal() {
 // UTILITIES
 // ============================================================
 
+const WRITE_ACTIONS = ['saveEntry', 'updateEntry', 'updateBudget', 'updateLogItem', 'deleteLogItem'];
+
 async function gasCall(payload, attempt = 0) {
+  // リトライで同じ書き込みが二重実行されないよう、初回にrequestIdを付与し
+  // 再送時も同じIDを使う（サーバー側でこのIDを見て重複実行を防ぐ）
+  if (attempt === 0 && WRITE_ACTIONS.includes(payload.action) && !payload.requestId) {
+    payload = { ...payload, requestId: (crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random())) };
+  }
   const res = await fetch(GAS_URL, {
     method: 'POST',
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ ...payload, secret: API_SECRET })
   });
 
   // res.json() だと解析失敗時に中身が分からないので、先にテキストで受ける

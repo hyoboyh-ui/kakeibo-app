@@ -7,9 +7,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="theme-color" content="#4A90D9">
   <link rel="apple-touch-icon" href="icon.png">
+  <link rel="manifest" href="manifest.json">
   <title>木村家 家計簿</title>
   <!-- ?v= は更新のたびに数字を上げる（ブラウザに古いファイルを使わせないため） -->
-  <link rel="stylesheet" href="css/style.css?v=20260808a">
+  <link rel="stylesheet" href="css/style.css?v=20260821b">
 </head>
 <body>
 
@@ -39,6 +40,10 @@
   <header>
     <h1 id="header-title">家計簿</h1>
     <div class="header-icons">
+      <button class="sync-badge hidden" id="sync-badge" onclick="syncNow()" title="未同期の記録を反映する">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"></path><path d="M7 9l5-5 5 5"></path><path d="M4 20h16"></path></svg>
+        <span>未同期 <span id="sync-badge-count">0</span></span>
+      </button>
       <select id="month-select" class="month-select-header" onchange="onMonthChange(this.value)">
       </select>
     </div>
@@ -194,6 +199,27 @@
   </div>
 </div>
 
+<!-- ============================================================
+     未同期の警告（5日以上同期されていないとき起動時に表示）
+============================================================ -->
+<div class="unsync-overlay" id="unsync-overlay">
+  <div class="unsync-card">
+    <div class="unsync-icon">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"></path><path d="M18.7 17.7A5 5 0 0 0 18 8h-1.3A8 8 0 0 0 6 5.3"></path><path d="M4.2 8.2A5 5 0 0 0 6 18h10"></path></svg>
+    </div>
+    <div class="unsync-title"><span id="unsync-days">5</span>日間同期されていません</div>
+    <div class="unsync-desc">
+      <span id="unsync-count-lead">0</span>件の記録がこの端末にだけあります。<br>スプレッドシートに反映しましょう。
+    </div>
+    <div class="unsync-info">
+      <div class="unsync-info-row"><span>最後の同期</span><span id="unsync-last">-</span></div>
+      <div class="unsync-info-row"><span>未同期の合計</span><span id="unsync-total">-</span></div>
+    </div>
+    <button class="btn btn-primary" onclick="syncFromDialog()">今すぐ同期する</button>
+    <button class="unsync-later" onclick="closeUnsyncedDialog()">あとで</button>
+  </div>
+</div>
+
 <!-- LOADING -->
 <div class="loading-overlay" id="loading-overlay">
   <div class="spinner"></div>
@@ -204,6 +230,8 @@
 
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="js/app.js?v=20260808a"></script>
+<!-- config.js は接続設定（Git管理外）。app.js より先に読み込む -->
+<script src="js/config.js?v=20260821b"></script>
+<script src="js/app.js?v=20260821b"></script>
 </body>
 </html>

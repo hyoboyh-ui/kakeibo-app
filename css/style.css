@@ -87,8 +87,8 @@ header {
   box-shadow: 0 2px 4px rgba(0,0,0,0.15);
 }
 
-header h1 { font-size: 17px; font-weight: 700; color: #fff; }
-header .header-icons { display: flex; gap: 10px; }
+header h1 { font-size: 17px; font-weight: 700; color: #fff; white-space: nowrap; }
+header .header-icons { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
 
 .month-select-header {
   background: rgba(255,255,255,0.25);
@@ -1173,4 +1173,108 @@ canvas { max-width: 100%; }
   border-radius: 99px;
   margin-left: 6px;
   vertical-align: middle;
+}
+
+/* ============================================================
+   同期バッジ / 未同期の警告ダイアログ
+============================================================ */
+
+.sync-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.22);
+  color: #FFFFFF;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 99px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.sync-badge:active { background: rgba(255, 255, 255, 0.34); }
+
+.entry-line-pending {
+  font-size: 10px;
+  font-weight: 600;
+  color: #854F0B;
+  background: #FAEEDA;
+  padding: 2px 6px;
+  border-radius: 99px;
+}
+
+.unsync-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 400;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.unsync-overlay.show { display: flex; }
+
+.unsync-card {
+  width: 100%;
+  max-width: 300px;
+  background: #FFFFFF;
+  border-radius: 16px;
+  padding: 22px 20px;
+  text-align: center;
+}
+
+.unsync-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #FAEEDA;
+  color: #854F0B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 14px;
+}
+
+.unsync-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 6px;
+}
+
+.unsync-desc {
+  font-size: 12.5px;
+  color: var(--text-sub);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.unsync-info {
+  background: #F7F5FB;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 18px;
+  text-align: left;
+}
+.unsync-info-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+.unsync-info-row + .unsync-info-row { margin-top: 4px; }
+.unsync-info-row span:last-child { color: var(--text-main); }
+
+.unsync-later {
+  width: 100%;
+  background: transparent;
+  color: var(--text-sub);
+  border: none;
+  padding: 9px;
+  font-size: 13px;
+  margin-top: 8px;
+  cursor: pointer;
 }
