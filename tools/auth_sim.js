@@ -10,7 +10,8 @@ const path = require('path');
 const crypto = require('crypto');
 
 const SRC = path.join(__dirname, '..', 'gas', 'Code.gs');
-const src = fs.readFileSync(SRC, 'utf8');
+// 改行コードに依存しないよう、読み込み時にLFへ正規化する
+const src = fs.readFileSync(SRC, 'utf8').split('\r\n').join('\n');
 
 // 認証セクション〜doGet までを切り出す（シート操作は含めない）
 const start = src.indexOf('// ============================================================\n// 認証');

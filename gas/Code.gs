@@ -153,10 +153,10 @@ function setupPassword(plainPassword) {
   // 全端末のログイン状態を破棄（パスワードを変えたら入り直してもらう）
   props.deleteProperty(SESSIONS_PROP);
 
-  // 旧 API_SECRET はここでは消さない。
-  // 同じプロジェクトの別スクリプト（月次JSON出力の exportMonthlyReport など）が
-  // まだ読んでいる可能性があるため、消すのは全部の動作確認が済んでから
-  // removeLegacySecret() で行う。認証には一切使っていないので、残っていても無害。
+  // 旧 API_SECRET はここでは消さない。認証には一切使っていないので残っていても
+  // 無害で、消す作業を動作確認の後ろへ回せる（removeLegacySecret）。
+  // ※当初は月次JSON出力が読んでいる可能性を疑っていたが、2026-08-22に実物を
+  //   確認したところ getMonthData を直接呼ぶだけで、このプロパティは使っていない。
 
   Logger.log('パスワードを設定しました（' + record.updatedAt + '）。'
     + '\n全端末のログイン状態を破棄したので、各自もう一度ログインしてください。'
@@ -1128,4 +1128,37 @@ function checkAndCreateNewSheet() {
 // 毎日午前0時16分に実行するトリガー用
 function dailyCheck() {
   checkAndCreateNewSheet();
+}
+
+// ============================================================
+// 月次JSON出力（家計だより用）
+//
+// 毎月16日、時間主導トリガーが exportMonthlyReport を呼び、締まった期間
+// （16日〜翌15日）のシートをJSONにして、Driveの共有フォルダ
+// 「家計簿レポート出力」へ書き出す。親向け月次レポート「家計だより」の入力データ。
+//
+// ※トリガーは「この関数名」で登録されている。名前を変えるとトリガーが空振りする。
+// ※2026-08-22、Code.gs の貼り付けで一度失われた。ユーザーの控えから復元し、
+//   今回リポジトリ管理下に置いた。以降は貼り付けで消えない。
+// ============================================================
+
+// 共有フォルダ「家計簿レポート出力」。母のドライブにあり、ユーザーへ共有されている
+const REPORT_FOLDER_ID = '1TD3kX8bJ1GYHMYWf_kMZV4Jo8O3pjmMx';
+
+// 毎月16日に、先月分（16日〜翌15日）のデータをDriveへJSON書き出しする
+function exportMonthlyReport() {
+  const now = new Date();
+  const targetDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  const sheetName = getSheetName(targetDate);
+  const data = getMonthData(sheetName);
+  const json = JSON.stringify(data);
+  const fileName = sheetName + '.json';
+
+  const folder = DriveApp.getFolderById(REPORT_FOLDER_ID);
+  const existing = folder.getFilesByName(fileName);
+  if (existing.hasNext()) {
+    existing.next().setContent(json);
+  } else {
+    folder.createFile(fileName, json, MimeType.PLAIN_TEXT);
+  }
 }
