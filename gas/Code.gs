@@ -1142,8 +1142,17 @@ function dailyCheck() {
 //   今回リポジトリ管理下に置いた。以降は貼り付けで消えない。
 // ============================================================
 
-// 共有フォルダ「家計簿レポート出力」。母のドライブにあり、ユーザーへ共有されている
-const REPORT_FOLDER_ID = '1TD3kX8bJ1GYHMYWf_kMZV4Jo8O3pjmMx';
+// 月次レポート（JSON）の書き出し先フォルダのID
+// （フォルダのURL https://drive.google.com/drive/folders/★ここ★ の部分）
+//
+// 実値をここに書いてコミットしている。このリポジトリは公開だが、フォルダIDは
+// 鍵ではなく住所にすぎない。開けるかどうかはGoogle側の共有設定が決めるので、
+// IDを知っていても共有されていなければアクセスできない（API_SECRETとはここが違う）。
+// 2026-08-22時点でこのフォルダの共有は所有者と本人のみ、リンク共有は無し。
+//
+// プレースホルダーに戻さないこと。リポジトリと本番が食い違うと、
+// 次に Code.gs を貼り付けた人が実値を失う（今回それで exportMonthlyReport を失った）。
+const REPORT_FOLDER_ID = '1TD3kX8bJ1GYHMYWf_kMZV4Jo8O3pjmMx';   // 家計簿レポート出力
 
 // 毎月16日に、先月分（16日〜翌15日）のデータをDriveへJSON書き出しする
 function exportMonthlyReport() {
