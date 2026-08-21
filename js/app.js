@@ -2,8 +2,8 @@
 // 木村家 家計簿アプリ
 // ============================================================
 
-// GAS_URL と API_SECRET は js/config.js で定義している。
-// （合言葉を公開リポジトリに載せないため、接続設定だけ別ファイルに分離）
+// GAS_URL は js/config.js で定義している。
+// URLは秘密ではない（知られても、パスワードが無ければサーバーが弾く）。
 
 const CATEGORIES = [
   { key: '食費',             hasMemo: true, color: 'cat-sky'   },
@@ -60,41 +60,78 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ============================================================
 // AUTH
+//
+// パスワードの照合はサーバー（GAS）が行う。端末に置くのは、照合に成功した
+// ときだけ発行されるトークンだけ。以前はこの端末の中だけでハッシュを比べて
+// いたため、別の端末やシークレットウィンドウからは何を入力しても入れてしまい、
+// 鍵として機能していなかった。
 // ============================================================
 
+const TOKEN_KEY = 'kakeibo_token';
+
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || '';
+}
+
+function setToken(token) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
+// トークンの有無しか見ない（期限切れや失効はサーバーの応答で分かる）。
+// 通信を待たずに画面を出すためで、無効だった場合は forceLogout が引き戻す。
 function isLoggedIn() {
-  return sessionStorage.getItem('kakeibo_auth') === getStoredHash();
-}
-
-function getStoredHash() {
-  return localStorage.getItem('kakeibo_pwd_hash') || '';
-}
-
-async function sha256(msg) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return !!getToken();
 }
 
 async function handleLogin(e) {
   e.preventDefault();
-  const pwd = document.getElementById('pwd-input').value;
-  const hash = await sha256(pwd);
-  const stored = getStoredHash();
+  const input = document.getElementById('pwd-input');
+  const errorEl = document.getElementById('login-error');
+  const btn = document.querySelector('#login-form button[type="submit"]');
+  const pwd = input.value;
+  if (!pwd) return;
 
-  if (!stored) {
-    // 初回：パスワード設定
-    localStorage.setItem('kakeibo_pwd_hash', hash);
-    sessionStorage.setItem('kakeibo_auth', hash);
+  errorEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = '確認中…';
+  try {
+    const res = await gasCall({ action: 'login', password: pwd });
+    setToken(res.token);
+    input.value = '';
     showApp();
+  } catch (err) {
+    errorEl.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'ログイン';
+  }
+}
+
+// トークンが無効になっていた場合の引き戻し。
+// 未同期の記録（kakeibo_pending）は消さない。消すと入力が失われる。
+function forceLogout() {
+  setToken('');
+  const app = document.getElementById('app-screen');
+  if (app) app.style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+// 設定画面からの明示的なログアウト
+async function logout() {
+  const pending = getPending();
+  if (pending.length &&
+      !confirm('未同期の記録が' + pending.length + '件あります。\nこの端末には残りますが、先に同期しておくのが安全です。\nこのままログアウトしますか？')) {
     return;
   }
-
-  if (hash === stored) {
-    sessionStorage.setItem('kakeibo_auth', hash);
-    showApp();
-  } else {
-    document.getElementById('login-error').textContent = 'パスワードが違います';
+  try {
+    await gasCall({ action: 'logout' });
+  } catch (err) {
+    // サーバーに届かなくても、この端末からトークンを消せば入れなくなる
   }
+  setToken('');
+  localStorage.removeItem(MONTH_CACHE_KEY);
+  location.reload();
 }
 
 // ============================================================
@@ -949,19 +986,25 @@ async function saveBudget() {
 }
 
 async function changePassword() {
-  const oldPwd = document.getElementById('old-pwd').value;
-  const newPwd = document.getElementById('new-pwd').value;
+  const oldEl = document.getElementById('old-pwd');
+  const newEl = document.getElementById('new-pwd');
+  const oldPwd = oldEl.value;
+  const newPwd = newEl.value;
   if (!oldPwd || !newPwd) { showToast('パスワードを入力してください'); return; }
+  if (newPwd.length < 6) { showToast('新しいパスワードは6文字以上にしてください'); return; }
 
-  const oldHash = await sha256(oldPwd);
-  if (oldHash !== getStoredHash()) { showToast('現在のパスワードが違います'); return; }
-
-  const newHash = await sha256(newPwd);
-  localStorage.setItem('kakeibo_pwd_hash', newHash);
-  sessionStorage.setItem('kakeibo_auth', newHash);
-  document.getElementById('old-pwd').value = '';
-  document.getElementById('new-pwd').value = '';
-  showToast('パスワードを変更しました');
+  showLoading(true);
+  try {
+    // 照合も保存もサーバー側。成功すると他の端末のログインは全部無効になる
+    const res = await gasCall({ action: 'changePassword', oldPassword: oldPwd, newPassword: newPwd });
+    setToken(res.token);
+    oldEl.value = '';
+    newEl.value = '';
+    showToast('パスワードを変更しました（他の端末は再ログインが必要です）');
+  } catch (err) {
+    showToast(err.message);
+  }
+  showLoading(false);
 }
 
 // ============================================================
@@ -1575,9 +1618,12 @@ async function gasCall(payload, attempt = 0) {
   if (attempt === 0 && WRITE_ACTIONS.includes(payload.action) && !payload.requestId) {
     payload = { ...payload, requestId: (crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random())) };
   }
+  // ログインだけはトークンをまだ持っていない（これから貰う）ので付けない
+  const body = payload.action === 'login' ? payload : { ...payload, token: getToken() };
+
   const res = await fetch(GAS_URL, {
     method: 'POST',
-    body: JSON.stringify({ ...payload, secret: API_SECRET })
+    body: JSON.stringify(body)
   });
 
   // res.json() だと解析失敗時に中身が分からないので、先にテキストで受ける
@@ -1586,8 +1632,10 @@ async function gasCall(payload, attempt = 0) {
   try {
     json = JSON.parse(text);
   } catch (err) {
-    // iOSのSafariでリダイレクト時に空応答が返ることがあるため、1度だけやり直す
-    if (attempt < 1) {
+    // iOSのSafariでリダイレクト時に空応答が返ることがあるため、1度だけやり直す。
+    // ただしパスワード変更だけは再送すると「旧パスワードが違う」と誤判定される
+    // （1回目が成功していた場合）ため、リトライせずエラーを見せる。
+    if (attempt < 1 && payload.action !== 'changePassword') {
       await new Promise(r => setTimeout(r, 600));
       return gasCall(payload, attempt + 1);
     }
@@ -1595,7 +1643,12 @@ async function gasCall(payload, attempt = 0) {
     throw new Error(head ? `サーバー応答が不正です: ${head}` : 'サーバーから空の応答が返りました');
   }
 
-  if (json.error) throw new Error(json.error);
+  if (json.error) {
+    // トークンが失効していた場合。放置すると以後の全操作が失敗し続けるので、
+    // ログイン画面へ戻して入り直してもらう。
+    if (json.code === 'AUTH' || json.code === 'STALE_CLIENT') forceLogout();
+    throw new Error(json.error);
+  }
   return json;
 }
 

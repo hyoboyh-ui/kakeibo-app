@@ -91,24 +91,116 @@ const TOTAL_COLS = 42;
 
 const WRITE_ACTIONS = ['saveEntry', 'updateEntry', 'updateBudget', 'updateLogItem', 'deleteLogItem', 'updateResidual', 'syncEntries'];
 
-const API_SECRET_PROP = 'API_SECRET';
+// ============================================================
+// 認証
+//
+// このWebアプリは「全員（匿名を含む）」で公開する必要がある。つまりURLは
+// 秘密にできない。また配信元が静的サイト（GitHub Pages）である以上、
+// フロントに埋め込んだ文字列も秘密にできない。
+//
+// したがって鍵は「フロントに書けないもの」＝家族が頭で覚えるパスワードだけ。
+// パスワードそのものは保存せず、ソルト付きの反復ハッシュだけを持つ。
+// ログインに成功した端末にはトークンを発行し、以降はそれで認証する。
+// ============================================================
+
+const PASSWORD_PROP = 'PASSWORD_RECORD';    // { salt, hash, iterations, updatedAt }
+const SESSIONS_PROP = 'SESSIONS';           // { token: 有効期限(ms), ... }
+const LEGACY_SECRET_PROP = 'API_SECRET';    // 旧方式。もう読まない（setupPasswordで削除する）
+
+const PWD_ITERATIONS = 12000;   // 反復回数。記録側に持たせているので後から変更してよい
+const TOKEN_TTL_DAYS = 90;      // トークンの有効期間
+const TOKEN_RENEW_DAYS = 30;    // 残りがこれを切ったら自動で延長する
+const MAX_SESSIONS = 20;        // 保持する端末数の上限（古いものから捨てる）
+
+const LOGIN_FAIL_KEY = 'login_fail_count';
+const LOGIN_FAIL_MAX = 10;      // この回数を超えたらロック
+const LOGIN_FAIL_WINDOW = 900;  // 15分（秒）
 
 // ============================================================
 // 初回セットアップ（Apps Scriptエディタから手動で1回だけ実行する）
 //
-// 実行すると合言葉(シークレット)を生成してログに出力する。
-// 出力された文字列を js/app.js の API_SECRET に貼り付けること。
+//   setupPassword('ここに家族で使うパスワード')
+//
+// を実行する。実行後、この行のパスワードは必ず消してから保存すること
+// （エディタの中身は履歴に残るため）。
+// パスワードはログに出さない。忘れた場合は再度この関数を実行して上書きする。
 // ※これを実行するまで、このWebアプリは全リクエストを拒否する（安全側に倒すため）
 // ============================================================
-function setupApiSecret() {
-  const secret = Utilities.getUuid() + Utilities.getUuid().replace(/-/g, '');
-  PropertiesService.getScriptProperties().setProperty(API_SECRET_PROP, secret);
-  Logger.log('生成された API_SECRET:\n' + secret + '\n\nこの文字列を js/app.js の API_SECRET に貼り付けてください。');
-  return secret;
+function setupPassword(plainPassword) {
+  if (typeof plainPassword !== 'string' || plainPassword.length < 6) {
+    throw new Error('setupPassword("6文字以上のパスワード") の形で実行してください');
+  }
+  const salt = Utilities.getUuid().replace(/-/g, '');
+  const record = {
+    salt: salt,
+    hash: hashPassword(plainPassword, salt, PWD_ITERATIONS),
+    iterations: PWD_ITERATIONS,
+    updatedAt: new Date().toISOString()
+  };
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(PASSWORD_PROP, JSON.stringify(record));
+
+  // 全端末のログイン状態を破棄（パスワードを変えたら入り直してもらう）
+  props.deleteProperty(SESSIONS_PROP);
+
+  // 旧 API_SECRET はここでは消さない。
+  // 同じプロジェクトの別スクリプト（月次JSON出力の exportMonthlyReport など）が
+  // まだ読んでいる可能性があるため、消すのは全部の動作確認が済んでから
+  // removeLegacySecret() で行う。認証には一切使っていないので、残っていても無害。
+
+  Logger.log('パスワードを設定しました（' + record.updatedAt + '）。'
+    + '\n全端末のログイン状態を破棄したので、各自もう一度ログインしてください。'
+    + '\n※このエディタに書いたパスワード文字列は消してから保存すること');
+  return 'ok';
+}
+
+// 旧方式の合言葉を片付ける。すべての動作確認（アプリのログイン、月次JSON出力）が
+// 済んでから、気が向いたときに1回実行すればよい。急ぐ必要はない。
+function removeLegacySecret() {
+  PropertiesService.getScriptProperties().deleteProperty(LEGACY_SECRET_PROP);
+  Logger.log('旧 API_SECRET を削除しました');
+  return 'ok';
+}
+
+// ログイン失敗のロックを手動で解除する（家族が締め出された場合の非常口）
+function resetLoginLock() {
+  CacheService.getScriptCache().remove(LOGIN_FAIL_KEY);
+  Logger.log('ログイン失敗カウンタをリセットしました');
+  return 'ok';
+}
+
+// ログイン1回にかかるハッシュ計算の時間を測る（エディタから実行する）。
+// 2秒を大きく超えるようなら PWD_ITERATIONS を下げてよい。
+// 反復回数はパスワード記録側に保存しているため、下げても既存のパスワードは
+// そのまま使える（次に setupPassword / パスワード変更をした時から新しい値になる）。
+function benchmarkHash() {
+  const t0 = Date.now();
+  hashPassword('benchmark', 'saltsaltsaltsalt', PWD_ITERATIONS);
+  const ms = Date.now() - t0;
+  Logger.log(PWD_ITERATIONS + '回の反復に ' + ms + 'ms かかりました'
+    + '\n（この時間がログイン1回あたりの計算コスト。2秒を大きく超えるなら PWD_ITERATIONS を下げる）');
+  return ms;
+}
+
+// ============================================================
+// ハッシュ
+// ============================================================
+
+function hashPassword(password, salt, iterations) {
+  let bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, salt + ':' + password, Utilities.Charset.UTF_8);
+  for (let i = 1; i < iterations; i++) {
+    bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes);
+  }
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += ('0' + (bytes[i] & 0xff).toString(16)).slice(-2);
+  }
+  return hex;
 }
 
 // タイミング攻撃を避けるため、長さと全文字を必ず最後まで比較する
-function secretMatches(given, expected) {
+function constantTimeEquals(given, expected) {
   if (typeof given !== 'string' || typeof expected !== 'string') return false;
   if (given.length !== expected.length) return false;
   let diff = 0;
@@ -116,6 +208,138 @@ function secretMatches(given, expected) {
     diff |= given.charCodeAt(i) ^ expected.charCodeAt(i);
   }
   return diff === 0;
+}
+
+// ============================================================
+// セッション（トークン）
+// ============================================================
+
+function readSessions() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(SESSIONS_PROP);
+    const obj = raw ? JSON.parse(raw) : {};
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+// 期限切れを捨て、多すぎる場合は期限が近いものから捨てて書き戻す
+function writeSessions(sessions) {
+  const now = Date.now();
+  let entries = Object.keys(sessions)
+    .filter(function (t) { return sessions[t] > now; })
+    .map(function (t) { return [t, sessions[t]]; });
+
+  if (entries.length > MAX_SESSIONS) {
+    entries.sort(function (a, b) { return b[1] - a[1]; });  // 期限が遠い＝新しいものを残す
+    entries = entries.slice(0, MAX_SESSIONS);
+  }
+  const out = {};
+  entries.forEach(function (pair) { out[pair[0]] = pair[1]; });
+  PropertiesService.getScriptProperties().setProperty(SESSIONS_PROP, JSON.stringify(out));
+  return out;
+}
+
+function issueToken() {
+  const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  const expiry = Date.now() + TOKEN_TTL_DAYS * 86400000;
+  const sessions = readSessions();
+  sessions[token] = expiry;
+  writeSessions(sessions);
+  return { token: token, expiresAt: expiry };
+}
+
+// 有効なら true。期限が近ければ黙って延長する（ログインし直しを避けるため）
+function tokenIsValid(token) {
+  if (typeof token !== 'string' || token.length < 32) return false;
+  const sessions = readSessions();
+  const expiry = sessions[token];
+  if (!expiry || expiry <= Date.now()) return false;
+
+  if (expiry - Date.now() < TOKEN_RENEW_DAYS * 86400000) {
+    sessions[token] = Date.now() + TOKEN_TTL_DAYS * 86400000;
+    writeSessions(sessions);
+  }
+  return true;
+}
+
+function revokeToken(token) {
+  const sessions = readSessions();
+  if (sessions[token]) {
+    delete sessions[token];
+    writeSessions(sessions);
+  }
+  return { ok: true };
+}
+
+// ============================================================
+// ログイン
+// ============================================================
+
+function loginFailCount() {
+  const v = CacheService.getScriptCache().get(LOGIN_FAIL_KEY);
+  return v ? parseInt(v, 10) : 0;
+}
+
+function bumpLoginFail() {
+  const next = loginFailCount() + 1;
+  CacheService.getScriptCache().put(LOGIN_FAIL_KEY, String(next), LOGIN_FAIL_WINDOW);
+  return next;
+}
+
+function handleLogin(data) {
+  // 総当たり対策。GASからは接続元IPが見えないため全体で数える。
+  // 家族が締め出された場合は resetLoginLock() をエディタで実行する。
+  if (loginFailCount() >= LOGIN_FAIL_MAX) {
+    return { error: 'ログインの失敗が続いたため一時的にロックしています。15分ほど待ってからお試しください', code: 'LOCKED' };
+  }
+
+  const raw = PropertiesService.getScriptProperties().getProperty(PASSWORD_PROP);
+  if (!raw) {
+    return { error: 'サーバー未設定です（Apps Scriptで setupPassword を1回実行してください）', code: 'NO_PASSWORD' };
+  }
+  const record = JSON.parse(raw);
+  const given = hashPassword(String(data.password || ''), record.salt, record.iterations);
+
+  if (!constantTimeEquals(given, record.hash)) {
+    bumpLoginFail();
+    return { error: 'パスワードが違います', code: 'BAD_PASSWORD' };
+  }
+
+  CacheService.getScriptCache().remove(LOGIN_FAIL_KEY);
+  return issueToken();
+}
+
+// アプリの設定画面から呼ぶ。現在のパスワードを知っている人だけが変更できる。
+// 変更したら、呼び出した端末以外のログインは全部無効にする。
+function handleChangePassword(data) {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(PASSWORD_PROP);
+  if (!raw) return { error: 'サーバー未設定です', code: 'NO_PASSWORD' };
+
+  const record = JSON.parse(raw);
+  const oldGiven = hashPassword(String(data.oldPassword || ''), record.salt, record.iterations);
+  if (!constantTimeEquals(oldGiven, record.hash)) {
+    bumpLoginFail();
+    return { error: '現在のパスワードが違います', code: 'BAD_PASSWORD' };
+  }
+
+  const newPassword = String(data.newPassword || '');
+  if (newPassword.length < 6) return { error: '新しいパスワードは6文字以上にしてください' };
+
+  const salt = Utilities.getUuid().replace(/-/g, '');
+  props.setProperty(PASSWORD_PROP, JSON.stringify({
+    salt: salt,
+    hash: hashPassword(newPassword, salt, PWD_ITERATIONS),
+    iterations: PWD_ITERATIONS,
+    updatedAt: new Date().toISOString()
+  }));
+
+  // 他端末のトークンを全部捨て、呼び出し元だけ新しく発行し直す
+  props.deleteProperty(SESSIONS_PROP);
+  const issued = issueToken();
+  return { ok: true, token: issued.token, expiresAt: issued.expiresAt };
 }
 
 function jsonOutput(obj) {
@@ -130,17 +354,22 @@ function doPost(e) {
     const data = JSON.parse(e.postData.contents);
     const action = data.action;
 
+    // --- ログインだけは認証前に通す（これ自体が認証なので） ------------
+    if (action === 'login')  return jsonOutput(handleLogin(data));
+    if (action === 'logout') return jsonOutput(revokeToken(data.token));
+
     // --- 認証 ---------------------------------------------------------
-    // このWebアプリは「全員（匿名を含む）」で公開する必要があるため、
-    // URLさえ知っていれば誰でも家計データを読み書きできてしまう。
-    // それを防ぐため、リクエスト本文の合言葉をスクリプトプロパティと照合する。
-    const expected = PropertiesService.getScriptProperties().getProperty(API_SECRET_PROP);
-    if (!expected) {
-      return jsonOutput({ error: 'サーバー未設定です（Apps Scriptで setupApiSecret を1回実行してください）' });
+    if (!tokenIsValid(data.token)) {
+      // 旧バージョンのフロントは token を知らず、代わりに secret を送ってくる。
+      // 「パスワードが違う」と誤解させないよう、更新を促す専用の応答を返す。
+      if (data.secret && !data.token) {
+        return jsonOutput({ error: 'アプリが古いため接続できません。画面を再読み込みしてください', code: 'STALE_CLIENT' });
+      }
+      return jsonOutput({ error: 'ログインの有効期限が切れました。もう一度ログインしてください', code: 'AUTH' });
     }
-    if (!secretMatches(data.secret, expected)) {
-      return jsonOutput({ error: '認証に失敗しました' });
-    }
+
+    // パスワード変更は認証済みだがシートに触らないので、ロックの外で処理する
+    if (action === 'changePassword') return jsonOutput(handleChangePassword(data));
 
     // --- 書き込みは直列化 ----------------------------------------------
     // saveEntry等は「セルを読む→加算して書く」構造のため、2人が同時に記録すると

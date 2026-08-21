@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.json">
   <title>木村家 家計簿</title>
   <!-- ?v= は更新のたびに数字を上げる（ブラウザに古いファイルを使わせないため） -->
-  <link rel="stylesheet" href="css/style.css?v=20260821b">
+  <link rel="stylesheet" href="css/style.css?v=20260822a">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
 <div id="login-screen" style="display:none">
   <div class="login-card">
     <h1>🏠 木村家 家計簿</h1>
-    <p id="login-hint">パスワードを入力してください<br>（初回はお好きなパスワードを設定）</p>
+    <p id="login-hint">パスワードを入力してください</p>
     <form id="login-form">
       <div class="form-group">
         <input type="password" id="pwd-input" class="form-control"
@@ -125,7 +125,7 @@
         <div class="settings-item">
           <span class="settings-label">ログアウト</span>
           <button class="btn btn-ghost" style="width:auto;padding:8px 16px;font-size:13px"
-            onclick="sessionStorage.clear();location.reload()">ログアウト</button>
+            onclick="logout()">ログアウト</button>
         </div>
       </div>
     </div>
@@ -230,8 +230,8 @@
 
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<!-- config.js は接続設定（Git管理外）。app.js より先に読み込む -->
-<script src="js/config.js?v=20260821b"></script>
-<script src="js/app.js?v=20260821b"></script>
+<!-- config.js は接続設定（GAS_URLのみ）。app.js より先に読み込む -->
+<script src="js/config.js?v=20260822a"></script>
+<script src="js/app.js?v=20260822a"></script>
 </body>
 </html>
