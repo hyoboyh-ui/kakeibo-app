@@ -460,6 +460,35 @@ function highlightMatch(text, term) {
     + escaped.slice(idx + term.length);
 }
 
+// 支払方法のバッジ。カード種類が分かっていればバッジ自体に出す
+// （以前は「カード」とだけ出し、種類は小さな別行にしていた）。
+function paymentBadgeHtml(method, cardType, search) {
+  const isCash = method === '現金';
+  const cls = isCash ? 'badge-cash' : 'badge-card';
+  const icon = isCash ? 'icons/cash.png' : 'icons/card.png';
+  const label = isCash ? '現金' : (cardType || 'カード');
+  return `<span class="payment-badge ${cls}"><img src="${icon}" class="payment-icon-small"> ${highlightMatch(label, search)}</span>`;
+}
+
+// 金額が1本しかないときのカード。合計行は出さない（同じ数字が2回並ぶだけなので）。
+function buildSingleCard({ catKey, color, badgeHtml, amount, memo, pending, search }) {
+  const card = document.createElement('div');
+  card.className = `entry-item entry-item-single ${color || ''}`;
+  card.innerHTML = `
+    <div class="entry-single-body">
+      <div class="entry-single-row">
+        <span class="entry-single-cat">${highlightMatch(catKey, search)}</span>
+        ${badgeHtml}
+        ${pending ? '<span class="entry-line-pending">未同期</span>' : ''}
+        <span class="entry-single-amount">¥${fmt(amount)}</span>
+      </div>
+      ${memo ? `<div class="entry-single-memo">📝 ${highlightMatch(memo, search)}</div>` : ''}
+    </div>
+    <div class="entry-chevron">›</div>
+  `;
+  return card;
+}
+
 function renderHistory() {
   const container = document.getElementById('history-list');
   if (!state.monthData) return;
@@ -527,6 +556,28 @@ function renderHistory() {
         const residualCard = Math.max(0, (d.カード || 0) - loggedCard);
         const showResidual = !hasFilterOrSearch && (residualCash > 0 || residualCard > 0);
 
+        // 金額行が1本だけなら、合計行は同じ数字を繰り返すだけになる。1行カードに畳む。
+        // 「それ以前の記録」がぶら下がっている場合は実質2行なので畳まない。
+        if (visibleItems.length === 1 && !showResidual) {
+          const only = visibleItems[0];
+          groupHasItem = true;
+          const singleCard = buildSingleCard({
+            catKey: cat.key,
+            color: cat.color,
+            badgeHtml: paymentBadgeHtml(only.paymentMethod, only.cardType, search),
+            amount: only.amount,
+            memo: only.memo,
+            pending: only.pending,
+            search
+          });
+          // 未同期の記録はまだサーバーに無いので、キューから取り消す操作だけ用意する
+          singleCard.addEventListener('click', () => only.pending
+            ? cancelPendingItem(only)
+            : openEditLogItemModal(only, cat.key, entry.date));
+          group.appendChild(singleCard);
+          return;
+        }
+
         groupHasItem = true;
         const card = document.createElement('div');
         card.className = `entry-item entry-item-multi ${cat.color || ''}`;
@@ -589,19 +640,45 @@ function renderHistory() {
       }
 
       groupHasItem = true;
+
+      // 明細カードと同じ規則で組む。カードかどうかではなく「金額行が何本あるか」で形を決める。
+      const rows = [];
+      if (hasCash) rows.push({ method: '現金', cardType: '', amount: d.現金 || 0 });
+      if (hasCard) rows.push({ method: 'カード', cardType: d.カード種類 || '', amount: d.カード || 0 });
+
+      // 1本だけならログ1件のときと同じ1行カード
+      if (rows.length === 1) {
+        const only = rows[0];
+        const singleCard = buildSingleCard({
+          catKey: cat.key,
+          color: cat.color,
+          badgeHtml: paymentBadgeHtml(only.method, only.cardType, search),
+          amount: only.amount,
+          memo: memoText,
+          search
+        });
+        singleCard.addEventListener('click', () => openEditModal(entry, cat.key));
+        group.appendChild(singleCard);
+        return;
+      }
+
+      // 現金とカードの両方がある場合は2行。個別の取引には割れないので行ごとの編集は無く、
+      // カード全体で集計の編集を開く。合計は「現金＋カード」の足し算。
       const item = document.createElement('div');
-      item.className = `entry-item ${cat.color || ''}`;
+      item.className = `entry-item entry-item-multi ${cat.color || ''}`;
       item.innerHTML = `
-        <div style="flex:1">
-          <div class="entry-cat">${highlightMatch(cat.key, search)}</div>
-          ${d.カード種類 ? `<div class="entry-cat-sub">${highlightMatch(d.カード種類, search)}</div>` : ''}
-          ${memoText ? `<div class="entry-cat-sub">📝 ${highlightMatch(memoText, search)}</div>` : ''}
+        <div class="entry-multi-cat entry-multi-cat-row">
+          <span>${highlightMatch(cat.key, search)}</span>
+          <span class="entry-chevron">›</span>
         </div>
-        <div class="entry-amount">
-          ${hasCash ? `<div>¥${fmt(d.現金)} <span class="payment-badge badge-cash"><img src="icons/cash.png" class="payment-icon-small"> 現金</span></div>` : ''}
-          ${hasCard ? `<div>¥${fmt(d.カード)} <span class="payment-badge badge-card"><img src="icons/card.png" class="payment-icon-small"> カード</span></div>` : ''}
-        </div>
-        <div style="font-size:18px;color:var(--text-sub);margin-left:4px">›</div>
+        ${memoText ? `<div class="entry-line-memo">📝 ${highlightMatch(memoText, search)}</div>` : ''}
+        ${rows.map(r => `
+          <div class="entry-line" style="cursor:inherit">
+            ${paymentBadgeHtml(r.method, r.cardType, search)}
+            <span class="entry-line-amount">¥${fmt(r.amount)}</span>
+          </div>
+        `).join('')}
+        <div class="entry-total-row"><span>合計</span><span>¥${fmt(rows.reduce((s, r) => s + r.amount, 0))}</span></div>
       `;
       item.addEventListener('click', () => openEditModal(entry, cat.key));
       group.appendChild(item);

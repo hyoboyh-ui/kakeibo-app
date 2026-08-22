@@ -581,9 +581,62 @@ mark.history-hl {
 /* ============================================================
    ENTRY LIST - 同日同カテゴリの複数記録を個別表示するカード（案1）
 ============================================================ */
+/* ------------------------------------------------------------
+   1行カード（その日そのカテゴリの金額が1本だけのとき）
+   カテゴリ → バッジ →(余白)→ 金額 → › の順に並べる。
+   金額を margin-left:auto で右端へ寄せるのは .entry-line と同じ考え方で、
+   明細カードと金額の右端がそろう。
+   ------------------------------------------------------------ */
+.entry-item-single { align-items: center; }
+
+.entry-single-body { flex: 1; min-width: 0; }
+
+.entry-single-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* カード種類「その他」は自由入力なので長い名前を入れられる。
+   バッジと金額は縮めず、あふれたらカテゴリ名を … で詰めて1行を保つ。 */
+.entry-single-cat {
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-single-row .payment-badge,
+.entry-single-row .entry-line-pending { flex-shrink: 0; }
+
+.entry-single-amount {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.entry-single-memo {
+  font-size: 11px;
+  color: var(--text-sub);
+  margin-top: 3px;
+}
+
+.entry-chevron {
+  font-size: 18px;
+  color: var(--text-sub);
+  margin-left: 4px;
+}
+
 .entry-item-multi {
   display: block;
   padding: 12px 14px;
+  /* 1行カードは › とその手前の隙間のぶん内側が19px狭い。
+     同じだけ右に余白を取って、金額の右端を両者でそろえる。 */
+  padding-right: 33px;
 }
 
 .entry-multi-cat {
@@ -591,6 +644,18 @@ mark.history-hl {
   font-weight: 600;
   margin-bottom: 6px;
 }
+
+/* 過去分の明細カードは行を個別に編集できないので、カード全体がタップ対象。
+   それが分かるようカテゴリ行の右端に › を置く。上で足した余白を打ち消して
+   › の位置を1行カードとそろえる。 */
+.entry-multi-cat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-right: -19px;
+}
+
+.entry-multi-cat-row .entry-chevron { margin-left: 0; }
 
 .entry-line {
   display: flex;
