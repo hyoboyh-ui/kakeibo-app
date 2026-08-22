@@ -474,16 +474,18 @@ function paymentBadgeHtml(method, cardType, search) {
 function buildSingleCard({ catKey, color, badgeHtml, amount, memo, pending, search }) {
   const card = document.createElement('div');
   card.className = `entry-item entry-item-single ${color || ''}`;
+  // 金額と › はカード直下に置く。メモでカードの背が伸びても、
+  // カード側の align-items:center が効いて高さの中央に来る。
   card.innerHTML = `
     <div class="entry-single-body">
       <div class="entry-single-row">
         <span class="entry-single-cat">${highlightMatch(catKey, search)}</span>
         ${badgeHtml}
         ${pending ? '<span class="entry-line-pending">未同期</span>' : ''}
-        <span class="entry-single-amount">¥${fmt(amount)}</span>
       </div>
       ${memo ? `<div class="entry-single-memo">📝 ${highlightMatch(memo, search)}</div>` : ''}
     </div>
+    <span class="entry-single-amount">¥${fmt(amount)}</span>
     <div class="entry-chevron">›</div>
   `;
   return card;
