@@ -271,6 +271,89 @@ select.form-control {
   padding-right: 36px;
 }
 
+/* ------------------------------------------------------------
+   カテゴリのタイル選択（支出を記録する画面）
+   以前は <select> で、iOSではホイールピッカーが開いて
+   「タップ→スクロール→完了」の3操作かかっていた。1タップにする。
+   履歴の絞り込みシート(.filter-cat-grid)と同じ2列grid。
+   ご両親が既に触っている見た目なので学習が要らない。
+   ------------------------------------------------------------ */
+.entry-cat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.entry-cat-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 46px;
+  padding: 8px 6px;
+  border-radius: 10px;
+  border: 1.5px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+/* 履歴カードと同じカテゴリ色を敷き、色と分類を結びつける */
+.entry-cat-tile.cat-sky   { background: var(--cat-sky); }
+.entry-cat-tile.cat-blue  { background: var(--cat-blue); }
+.entry-cat-tile.cat-lav   { background: var(--cat-lav); }
+.entry-cat-tile.cat-mauve { background: var(--cat-mauve); }
+.entry-cat-tile.cat-pink  { background: var(--cat-pink); }
+
+.entry-cat-tile.selected {
+  border-color: var(--primary-dark);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.entry-cat-tile:active { transform: scale(0.97); }
+
+/* 選んだ後はグリッドを畳み、選択中の1つと「変更」だけを出す。
+   タイル10個を出したままだと縦に171px伸び、iPhone SE(第2世代)では
+   保存ボタンが143px画面外へ出てしまうため（実測）。
+   畳めば520pxに収まり、<select>だった頃(567px)より短くなる。 */
+.entry-cat-picked {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.entry-cat-picked .entry-cat-tile { flex: 1; }
+
+.entry-cat-change {
+  flex-shrink: 0;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text-sub);
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.entry-cat-change:active { opacity: 0.6; }
+
+/* 保存ボタンをシートの下端に貼り付ける。
+   カテゴリを選ぶと支払方法・金額・メモが一斉に出てフォームが伸び、
+   iPhone SE(第2世代)では保存ボタンが画面外へ出ていた（実測で14px）。
+   貼り付けておけば、フォームが何行になっても押せる位置に残る。 */
+#submit-group {
+  position: sticky;
+  bottom: -36px;                 /* .modal-sheet の padding-bottom を打ち消す */
+  margin: 4px -20px -36px;       /* 左右も打ち消して端まで背景を敷く */
+  padding: 10px 20px 36px;
+  background: var(--card-bg);
+}
+
 .radio-group {
   display: flex;
   gap: 10px;

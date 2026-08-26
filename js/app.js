@@ -1124,6 +1124,46 @@ function openEditModal(entry, categoryKey) {
   openModal();
 }
 
+// カテゴリの選択部分だけを描き直す。
+// 未選択なら10個のタイル、選択済みなら選んだ1つと「変更」ボタン。
+// 畳むのは見た目の好みではなく、タイルを出したままだと iPhone SE(第2世代) で
+// 保存ボタンが画面外に出るため（実測で143pxはみ出す）。
+function renderCatPicker(forceOpen) {
+  const box = document.getElementById('cat-picker');
+  if (!box) return;
+
+  const picked = entryFormState.category;
+
+  if (picked && !forceOpen) {
+    const cat = CATEGORIES.find(c => c.key === picked);
+    box.className = 'entry-cat-picked';
+    box.innerHTML = `
+      <div class="entry-cat-tile ${cat?.color || ''} selected">${picked}</div>
+      <button type="button" class="entry-cat-change">変更</button>
+    `;
+    box.querySelector('.entry-cat-change').addEventListener('click', () => renderCatPicker(true));
+    return;
+  }
+
+  box.className = 'entry-cat-grid';
+  box.innerHTML = '';
+  CATEGORIES.forEach(cat => {
+    const tile = document.createElement('div');
+    tile.className = `entry-cat-tile ${cat.color || ''}` + (cat.key === picked ? ' selected' : '');
+    tile.textContent = cat.key;
+    tile.addEventListener('click', () => {
+      const changed = entryFormState.category !== cat.key;
+      entryFormState.category = cat.key;
+      if (changed) entryFormState.payment = null;
+      renderCatPicker();          // 選んだので畳む
+      updatePaymentVisibility();
+      // 「いつもの支払方法」を選択済みにする。違えば押し直せばよい
+      if (changed) applyRememberedPayment(cat.key);
+    });
+    box.appendChild(tile);
+  });
+}
+
 function renderEntryForm() {
   const body = document.getElementById('modal-body');
 
@@ -1138,10 +1178,7 @@ function renderEntryForm() {
     </div>
     <div class="form-group">
       <label class="form-label">カテゴリ</label>
-      <select class="form-control" id="cat-select">
-        <option value="">選択してください</option>
-        ${CATEGORIES.map(c => `<option value="${c.key}">${c.key}</option>`).join('')}
-      </select>
+      <div id="cat-picker"></div>
     </div>
     <div id="payment-group" class="hidden">
       <div class="form-group">
@@ -1201,12 +1238,7 @@ function renderEntryForm() {
     if (sel) sel.scrollIntoView({ inline: 'center', block: 'nearest' });
   }, 50);
 
-  // カテゴリ選択イベント
-  document.getElementById('cat-select').addEventListener('change', e => {
-    entryFormState.category = e.target.value;
-    entryFormState.payment = null;
-    updatePaymentVisibility();
-  });
+  renderCatPicker();
 
   document.getElementById('card-type-select')?.addEventListener('change', e => {
     entryFormState.cardType = e.target.value;
@@ -1261,6 +1293,59 @@ function renderEditForm(entry, cat, d) {
   document.getElementById('edit-card-type')?.addEventListener('change', e => {
     document.getElementById('edit-other-group').classList.toggle('hidden', e.target.value !== 'その他');
   });
+}
+
+// ============================================================
+// 支払方法の記憶
+//
+// 「食費はいつも現金」「光熱費はいつもカード」を覚えておき、カテゴリを選んだ
+// 時点で支払方法まで選択済みにする。違えば押し直せばよいので、間違いは起きない。
+// 端末ごとの好みなので localStorage に置く（サーバーには送らない）。
+// ============================================================
+
+const LAST_PAYMENT_KEY = 'kakeibo_last_payment';
+
+function getLastPayments() {
+  try {
+    const raw = localStorage.getItem(LAST_PAYMENT_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function rememberPayment(category, payment, cardType) {
+  if (!category || !payment) return;
+  try {
+    const all = getLastPayments();
+    all[category] = { payment, cardType: cardType || '' };
+    localStorage.setItem(LAST_PAYMENT_KEY, JSON.stringify(all));
+  } catch (err) {
+    // 容量超過などは無視。覚えられなくても入力自体は成立する
+  }
+}
+
+// 覚えている支払方法を画面に反映する。無ければ何もしない
+function applyRememberedPayment(category) {
+  const remembered = getLastPayments()[category];
+  if (!remembered || !remembered.payment) return;
+
+  if (remembered.payment === 'カード') {
+    const sel = document.getElementById('card-type-select');
+    if (sel) {
+      // 「その他」で自由入力した名前は選択肢に無い。そのまま入れると「なし」に
+      // 落ちるので、「その他」を選んだうえで自由入力欄に名前を戻す
+      const known = CARD_TYPES.includes(remembered.cardType);
+      sel.value = known ? remembered.cardType : 'その他';
+      document.getElementById('other-card-group')?.classList.toggle('hidden', sel.value !== 'その他');
+      if (!known && remembered.cardType) {
+        const other = document.getElementById('other-card-input');
+        if (other) other.value = remembered.cardType;
+      }
+    }
+  }
+  selectPayment(remembered.payment);
 }
 
 function selectPayment(method) {
@@ -1318,6 +1403,9 @@ async function submitEntry() {
     time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
     createdAt: now.getTime()
   });
+
+  // 次回このカテゴリを選んだとき、同じ支払方法を選択済みにする
+  rememberPayment(category, payment, resolvedCardType);
 
   closeModal();
   showToast('記録しました（未同期）');
