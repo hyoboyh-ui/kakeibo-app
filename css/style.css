@@ -788,10 +788,19 @@ mark.history-hl {
 .entry-total-row {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   margin-top: 6px;
   padding-top: 8px;
   border-top: 1px dashed var(--lavender);
   font-size: 13px;
+  font-weight: 700;
+}
+
+/* 合計の金額だけは1行カードの金額と同じ大きさにして、
+   何件入っていても「その日その分類でいくら使ったか」が一目で分かるようにする。
+   左の「合計」ラベルは13pxのままにして、数字を目立たせる。 */
+.entry-total-row span:last-child {
+  font-size: 15px;
   font-weight: 700;
 }
 
