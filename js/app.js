@@ -18,7 +18,7 @@ const CATEGORIES = [
   { key: '固定費',           hasMemo: true, color: 'cat-mauve' }
 ];
 
-const CARD_TYPES = ['三井住友', 'セゾン', 'JCB', 'その他'];
+const CARD_TYPES = ['三井住友', 'Olive', 'セゾン', 'JCB', 'その他'];
 
 // ============================================================
 // STATE
