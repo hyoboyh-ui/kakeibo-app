@@ -14,7 +14,11 @@ const CATEGORIES = [
   { key: '光熱費(ガス電気)', hasMemo: true, color: 'cat-blue'  },
   { key: '光熱費(携帯ネット)', hasMemo: true, color: 'cat-sky' },
   { key: '水道代',           hasMemo: true, color: 'cat-lav'   },
-  { key: '緊急出費',         hasMemo: true, color: 'cat-pink'  },
+  // 緊急出費は中身が「本当に急な出費」「予測できた買い物」「毎月の通院」の
+  // 混ざりものになりやすいので、記録するときに内訳を選べるようにしている。
+  // スプレッドシートの列は増やさず、内訳は取引ログにだけ持たせている。
+  { key: '緊急出費',         hasMemo: true, color: 'cat-pink',
+    subCategories: ['急な出費', '家電・贈り物', '通院費'] },
   { key: '固定費',           hasMemo: true, color: 'cat-mauve' }
 ];
 
@@ -220,9 +224,12 @@ function viewData() {
     if (!Array.isArray(d.items)) d.items = [];
     d.items.push({
       id: p.id, paymentMethod: p.paymentMethod, cardType: p.cardType || '',
-      amount: p.amount, memo: p.memo || '', time: p.time || '', pending: true
+      amount: p.amount, memo: p.memo || '', subCategory: p.subCategory || '',
+      time: p.time || '', pending: true
     });
-    if (p.memo) d.メモ = d.メモ ? d.メモ + ' / ' + p.memo : p.memo;
+    // 内訳はGAS側でもメモ欄の先頭に付けて保存するので、未同期分も同じ形で重ねる
+    const memoLabel = [p.subCategory, p.memo].filter(v => v).join('：');
+    if (memoLabel) d.メモ = d.メモ ? d.メモ + ' / ' + memoLabel : memoLabel;
   });
   return merged;
 }
@@ -462,6 +469,18 @@ function highlightMatch(text, term) {
 
 // 支払方法のバッジ。カード種類が分かっていればバッジ自体に出す
 // （以前は「カード」とだけ出し、種類は小さな別行にしていた）。
+// 内訳を持つカテゴリだけ、その一覧を返す（持たないカテゴリは空配列）
+function subCategoriesOf(categoryKey) {
+  const cat = CATEGORIES.find(c => c.key === categoryKey);
+  return (cat && cat.subCategories) || [];
+}
+
+// 履歴カードに出す内訳の小さな札。内訳が無い記録では何も出さない
+function subBadgeHtml(subCategory, search) {
+  if (!subCategory) return '';
+  return `<span class="entry-sub-badge">${highlightMatch(subCategory, search)}</span>`;
+}
+
 function paymentBadgeHtml(method, cardType, search) {
   const isCash = method === '現金';
   const cls = isCash ? 'badge-cash' : 'badge-card';
@@ -471,7 +490,7 @@ function paymentBadgeHtml(method, cardType, search) {
 }
 
 // 金額が1本しかないときのカード。合計行は出さない（同じ数字が2回並ぶだけなので）。
-function buildSingleCard({ catKey, color, badgeHtml, amount, memo, pending, search }) {
+function buildSingleCard({ catKey, color, badgeHtml, subCategory, amount, memo, pending, search }) {
   const card = document.createElement('div');
   card.className = `entry-item entry-item-single ${color || ''}`;
   // 金額と › はカード直下に置く。メモでカードの背が伸びても、
@@ -480,6 +499,7 @@ function buildSingleCard({ catKey, color, badgeHtml, amount, memo, pending, sear
     <div class="entry-single-body">
       <div class="entry-single-row">
         <span class="entry-single-cat">${highlightMatch(catKey, search)}</span>
+        ${subBadgeHtml(subCategory, search)}
         ${badgeHtml}
         ${pending ? '<span class="entry-line-pending">未同期</span>' : ''}
       </div>
@@ -544,7 +564,8 @@ function renderHistory() {
           if (paymentFilter.length > 0 && !paymentFilter.includes(it.paymentMethod)) return false;
           if (it.paymentMethod === 'カード' && cardTypeFilter.length > 0 && !cardTypeFilter.includes(it.cardType)) return false;
           if (search) {
-            const haystack = (cat.key + ' ' + (it.memo || '') + ' ' + (it.cardType || '')).toLowerCase();
+            const haystack = (cat.key + ' ' + (it.memo || '') + ' ' + (it.cardType || '')
+              + ' ' + (it.subCategory || '')).toLowerCase();
             if (!haystack.includes(search)) return false;
           }
           return true;
@@ -567,6 +588,7 @@ function renderHistory() {
             catKey: cat.key,
             color: cat.color,
             badgeHtml: paymentBadgeHtml(only.paymentMethod, only.cardType, search),
+            subCategory: only.subCategory,
             amount: only.amount,
             memo: only.memo,
             pending: only.pending,
@@ -594,6 +616,7 @@ function renderHistory() {
           linesHtml += `
             <div class="entry-line" data-id="${it.id}">
               <span class="entry-line-time">${it.time || ''}</span>
+              ${subBadgeHtml(it.subCategory, search)}
               <span class="payment-badge ${badgeClass}"><img src="${icon}" class="payment-icon-small"> ${highlightMatch(label, search)}</span>
               ${it.pending ? '<span class="entry-line-pending">未同期</span>' : ''}
               <span class="entry-line-amount">¥${fmt(it.amount)}</span>
@@ -1102,7 +1125,7 @@ function setupFab() {
 }
 
 function openEntryModal() {
-  entryFormState = { date: todayString(), category: null, payment: null, cardType: null };
+  entryFormState = { date: todayString(), category: null, payment: null, cardType: null, subCategory: null };
   state.editingEntry = null;
   document.getElementById('modal-title').textContent = '支出を記録';
   renderEntryForm();
@@ -1155,12 +1178,34 @@ function renderCatPicker(forceOpen) {
       const changed = entryFormState.category !== cat.key;
       entryFormState.category = cat.key;
       if (changed) entryFormState.payment = null;
+      // 内訳があるカテゴリは先頭（緊急出費なら「急な出費」）を選んだ状態にしておく。
+      // 何も考えずに保存しても分類が付くので、今までと同じ手数で終わらせられる。
+      if (changed) entryFormState.subCategory = subCategoriesOf(cat.key)[0] || null;
       renderCatPicker();          // 選んだので畳む
+      renderSubCatPicker();
       updatePaymentVisibility();
       // 「いつもの支払方法」を選択済みにする。違えば押し直せばよい
       if (changed) applyRememberedPayment(cat.key);
     });
     box.appendChild(tile);
+  });
+}
+
+// 内訳の選択（今は緊急出費だけ）。内訳を持たないカテゴリでは欄そのものを出さない。
+function renderSubCatPicker() {
+  const row = document.getElementById('subcat-row');
+  if (!row) return;
+  const subs = subCategoriesOf(entryFormState.category);
+  row.innerHTML = '';
+  subs.forEach(sub => {
+    const chip = document.createElement('div');
+    chip.className = 'subcat-chip' + (sub === entryFormState.subCategory ? ' selected' : '');
+    chip.textContent = sub;
+    chip.addEventListener('click', () => {
+      entryFormState.subCategory = sub;
+      renderSubCatPicker();
+    });
+    row.appendChild(chip);
   });
 }
 
@@ -1179,6 +1224,10 @@ function renderEntryForm() {
     <div class="form-group">
       <label class="form-label">カテゴリ</label>
       <div id="cat-picker"></div>
+    </div>
+    <div id="subcat-group" class="form-group hidden">
+      <label class="form-label">内訳</label>
+      <div class="subcat-row" id="subcat-row"></div>
     </div>
     <div id="payment-group" class="hidden">
       <div class="form-group">
@@ -1367,6 +1416,8 @@ function updatePaymentVisibility() {
   const hasPay = !!entryFormState.payment;
 
   document.getElementById('payment-group').classList.toggle('hidden', !hasCat);
+  const hasSub = hasCat && subCategoriesOf(entryFormState.category).length > 0;
+  document.getElementById('subcat-group')?.classList.toggle('hidden', !hasSub);
   document.getElementById('card-type-group').classList.toggle('hidden', !(hasPay && entryFormState.payment === 'カード'));
   document.getElementById('amount-group').classList.toggle('hidden', !hasPay);
 
@@ -1377,6 +1428,8 @@ function updatePaymentVisibility() {
 
 async function submitEntry() {
   const { date, category, payment, cardType } = entryFormState;
+  const subs = subCategoriesOf(category);
+  const subCategory = subs.includes(entryFormState.subCategory) ? entryFormState.subCategory : (subs[0] || '');
   const amount = parseInt(document.getElementById('amount-input').value) || 0;
   const memo = document.getElementById('memo-input')?.value || '';
 
@@ -1400,6 +1453,7 @@ async function submitEntry() {
     cardType: resolvedCardType || '',
     amount,
     memo,
+    subCategory,
     time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
     createdAt: now.getTime()
   });
@@ -1594,6 +1648,9 @@ function renderEditLogItemForm(item, cat, date) {
   // 選択肢に無い種類（「その他」で入力した名前）を「なし」扱いで消さないようにする
   const isOtherCard = !!item.cardType && !CARD_TYPES.includes(item.cardType);
   const showOtherInput = isOtherCard || item.cardType === 'その他';
+  // 内訳が付く前の記録には内訳が無い。勝手に分類が付かないよう「（未選択）」を残す
+  const subs = cat.subCategories || [];
+  const currentSub = subs.includes(item.subCategory) ? item.subCategory : '';
 
   body.innerHTML = `
     <div class="card mb-0" style="margin-bottom:16px;background:#F7F8FC">
@@ -1604,6 +1661,14 @@ function renderEditLogItemForm(item, cat, date) {
       <label class="form-label">${item.paymentMethod}の金額</label>
       <input type="number" class="form-control" id="log-edit-amount" value="${item.amount || ''}" placeholder="0" inputmode="numeric">
     </div>
+    ${subs.length > 0 ? `
+    <div class="form-group">
+      <label class="form-label">内訳</label>
+      <select class="form-control" id="log-edit-subcat">
+        ${currentSub ? '' : '<option value="" selected>（未選択）</option>'}
+        ${subs.map(sub => `<option value="${sub}" ${currentSub === sub ? 'selected' : ''}>${sub}</option>`).join('')}
+      </select>
+    </div>` : ''}
     ${isCard ? `
     <div class="form-group">
       <label class="form-label">カードの種類</label>
@@ -1640,10 +1705,11 @@ async function submitEditLogItem() {
     }
   }
   const memo = document.getElementById('log-edit-memo')?.value || '';
+  const subCategory = document.getElementById('log-edit-subcat')?.value || '';
 
   showLoading(true);
   try {
-    await gasCall({ action: 'updateLogItem', id: item.id, amount, cardType, memo });
+    await gasCall({ action: 'updateLogItem', id: item.id, amount, cardType, memo, subCategory });
     state.allMonths = null;
     await loadCurrentMonth(state.currentSheet);
     closeModal();

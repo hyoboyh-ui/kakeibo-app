@@ -63,6 +63,22 @@ const CATEGORIES = [
   { key: '固定費', cashCol: 31, cardCol: 32, cardTypeCol: 33, memoCol: 42 }
 ];
 
+// カテゴリの中の内訳。スプレッドシートの列は増やさず、取引ログにだけ内訳を持たせる。
+// 集計セル・予算・月シートの列構成は一切変わらないので、既存データに影響しない。
+const SUB_CATEGORIES = {
+  '緊急出費': ['急な出費', '家電・贈り物', '通院費']
+};
+
+// 内訳を持たないカテゴリなら空文字。持つカテゴリなら決められた3つのどれかに寄せる。
+// fallbackToFirst は新規作成のときだけ true にする。更新のときに true にすると、
+// 内訳が付く前の古い記録を編集しただけで勝手に「急な出費」に書き換わってしまう。
+function sanitizeSubCategory(category, sub, fallbackToFirst) {
+  const allowed = SUB_CATEGORIES[category];
+  if (!allowed) return '';
+  if (allowed.indexOf(sub) >= 0) return sub;
+  return fallbackToFirst ? allowed[0] : '';
+}
+
 const HEADERS = [
   '日付', '曜日',
   '食費現金', '食費カード', '食費カード種類',
@@ -537,7 +553,7 @@ function columnLetter(n) {
 // ============================================================
 
 const LOG_SHEET_NAME = '取引ログ';
-const LOG_HEADERS = ['id', 'sheetName', 'date', 'category', 'paymentMethod', 'cardType', 'amount', 'memo', 'recordedAt', 'deleted'];
+const LOG_HEADERS = ['id', 'sheetName', 'date', 'category', 'paymentMethod', 'cardType', 'amount', 'memo', 'recordedAt', 'deleted', 'subCategory'];
 
 function getLogSheet() {
   const ss = getSS();
@@ -557,12 +573,21 @@ function getLogSheet() {
     ws.getRange('B:C').setNumberFormat('@');
     props.setProperty('LOG_COLS_FORMATTED', '1');
   }
+  // 内訳(subCategory)列は後から足したので、既に存在するログシートには見出しが無い。
+  // 列そのものが足りていない場合もあるため、広げてから見出しを入れる（1回だけ）。
+  if (props.getProperty('LOG_SUBCAT_COL') !== '1') {
+    const need = LOG_HEADERS.length;
+    if (ws.getMaxColumns() < need) ws.insertColumnsAfter(ws.getMaxColumns(), need - ws.getMaxColumns());
+    ws.getRange(1, need).setValue(LOG_HEADERS[need - 1]);
+    props.setProperty('LOG_SUBCAT_COL', '1');
+  }
   return ws;
 }
 
-function buildLogRow({ id, sheetName, date, category, paymentMethod, cardType, amount, memo }) {
+function buildLogRow({ id, sheetName, date, category, paymentMethod, cardType, amount, memo, subCategory }) {
   return [id || Utilities.getUuid(), sheetName, date, category, paymentMethod,
-          cardType || '', amount, memo || '', new Date(), false];
+          cardType || '', amount, memo || '', new Date(), false,
+          sanitizeSubCategory(category, subCategory, true)];
 }
 
 // 複数行をまとめて1回で書き込む（1件ずつ書くと件数分だけ通信が発生するため）
@@ -704,7 +729,10 @@ function recalcCell(monthWs, sheetName, date, category, knownRow) {
       card += it.amount;
       if (it.cardType && cardTypes.indexOf(it.cardType) === -1) cardTypes.push(it.cardType);
     }
-    if (it.memo) memos.push(it.memo);
+    // 内訳はスプレッドシートに専用の列を作らない方針なので、メモ欄の先頭に付けて残す。
+    // こうしておけば、シートを直接見た人にも「通院費：歯科」のように中身が伝わる。
+    const label = [it.subCategory, it.memo].filter(v => v).join('：');
+    if (label) memos.push(label);
   });
 
   const cardTypeText = cardTypes.join(', ');
@@ -738,7 +766,7 @@ function getLogRows(sheetName) {
       rowIndex: i + 2,
       id: row[0], sheetName: rowSheetName, date: rowDate, category: row[3],
       paymentMethod: row[4], cardType: row[5] || '', amount: row[6] || 0,
-      memo: row[7] || '', recordedAt: row[8]
+      memo: row[7] || '', recordedAt: row[8], subCategory: row[10] || ''
     });
   });
   return rows;
@@ -753,7 +781,7 @@ function findLogRowById(id) {
 }
 
 function updateLogItem(data) {
-  const { id, amount, cardType, memo } = data;
+  const { id, amount, cardType, memo, subCategory } = data;
   const found = findLogRowById(id);
   if (!found) return { error: '記録が見つかりません' };
   const { ws, rowIndex, row } = found;
@@ -767,6 +795,12 @@ function updateLogItem(data) {
   // ログ行を更新してから、集計セルを丸ごと再計算する（差分加算はしない）
   ws.getRange(rowIndex, 6, 1, 3).setValues([[cardType || '', amount || 0, memo || '']]);
   row[5] = cardType || ''; row[6] = amount || 0; row[7] = memo || ''; // 読み込み済みの値も更新
+
+  // 内訳は離れた列なので別に書く。fallbackToFirst を false にしているので、
+  // 内訳の無い古い記録を編集しても勝手に分類が付くことはない。
+  const sub = sanitizeSubCategory(category, subCategory, false);
+  ws.getRange(rowIndex, 11).setValue(sub);
+  row[10] = sub;
 
   const updated = recalcCell(monthWs, sheetName, date, category);
   if (!updated) return { error: `再計算に失敗しました: ${date} / ${category}` };
@@ -824,7 +858,8 @@ function syncEntries(data) {
     ensureResidual(ws, name, en.date, en.category, cat, targetRow);
     newRows.push(buildLogRow({
       id: en.id, sheetName: name, date: en.date, category: en.category,
-      paymentMethod: en.paymentMethod, cardType: en.cardType, amount: en.amount, memo: en.memo
+      paymentMethod: en.paymentMethod, cardType: en.cardType, amount: en.amount, memo: en.memo,
+      subCategory: en.subCategory
     }));
     existingIds[en.id] = true;
     affected[name + '|' + en.date + '|' + en.category] = { name, date: en.date, category: en.category, row: targetRow };
@@ -916,6 +951,7 @@ function getMonthData(sheetName) {
       cardType: item.cardType,
       amount: item.amount,
       memo: item.memo,
+      subCategory: item.subCategory || '',
       time: item.recordedAt instanceof Date
         ? Utilities.formatDate(item.recordedAt, 'Asia/Tokyo', 'HH:mm')
         : ''
@@ -1014,7 +1050,7 @@ function getAllMonthsData() {
 // ============================================================
 
 function saveEntry(data) {
-  const { sheetName, date, category, paymentMethod, cardType, amount, memo } = data;
+  const { sheetName, date, category, paymentMethod, cardType, amount, memo, subCategory } = data;
   const name = sheetName || getCurrentSheetName();
   let ws = getSheetCached(name);
   if (!ws) ws = createSheet(name);
@@ -1028,7 +1064,7 @@ function saveEntry(data) {
   // ログを積む前に、内訳の分からない既存分を残高ベースへ退避しておく
   ensureResidual(ws, name, date, category, cat, targetRow);
 
-  const id = appendLogItem({ sheetName: name, date, category, paymentMethod, cardType, amount, memo });
+  const id = appendLogItem({ sheetName: name, date, category, paymentMethod, cardType, amount, memo, subCategory });
 
   // 集計セルは「残高ベース + 有効なログ」から必ず再計算する（行番号は判明済み）
   const updated = recalcCell(ws, name, date, category, targetRow);
@@ -1043,6 +1079,7 @@ function saveEntry(data) {
       cardType: cardType || '',
       amount,
       memo: memo || '',
+      subCategory: sanitizeSubCategory(category, subCategory, true),
       time: Utilities.formatDate(new Date(), 'Asia/Tokyo', 'HH:mm')
     },
     updated

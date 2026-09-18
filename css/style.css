@@ -359,6 +359,38 @@ select.form-control {
   gap: 10px;
 }
 
+/* ------------------------------------------------------------
+   内訳の選択（今は緊急出費だけ）
+   支払方法のボタンと同じ「押して選ぶ」形。ただし「家電・贈り物」は
+   文字数が多く、375px幅で3つを等分すると入らないので、
+   折り返しを許す丸いチップにしている（履歴の絞り込みと同じ形）。
+   ------------------------------------------------------------ */
+.subcat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.subcat-chip {
+  padding: 9px 14px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: var(--card-bg);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.subcat-chip.selected {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+.subcat-chip:active { transform: scale(0.97); }
+
 .radio-btn {
   flex: 1;
   padding: 11px;
@@ -659,6 +691,20 @@ mark.history-hl {
 .entry-amount .payment-badge { margin-left: 6px; }
 
 .badge-cash { background: #E8F6FD; color: #4A8BB0; }
+
+/* 内訳の札。支払方法のバッジと同じ寸法にして、色だけで役割を分ける。
+   内訳の無い記録（内訳を入れる前の分）では出さない。 */
+.entry-sub-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #F3ECFA;
+  color: #7A5BAF;
+}
 .badge-card { background: #EDE8F8; color: #7A5BAF; }
 
 /* ============================================================
